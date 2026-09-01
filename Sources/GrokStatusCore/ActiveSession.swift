@@ -56,4 +56,23 @@ public enum ProcessLiveness {
         }
         return false
     }
+
+    /// Controlling TTY name such as `ttys000`, or `nil` if the process has none.
+    public static func ttyName(of pid: pid_t) -> String? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let result = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+        guard result == 0, size > 0 else { return nil }
+        let dev = info.kp_eproc.e_tdev
+        guard dev != 0, dev != -1 else { return nil }
+        var buf = [CChar](repeating: 0, count: 128)
+        let ok = buf.withUnsafeMutableBufferPointer { ptr in
+            devname_r(dev, S_IFCHR, ptr.baseAddress, Int32(ptr.count)) != nil
+        }
+        guard ok else { return nil }
+        let bytes = buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        let name = String(decoding: bytes, as: UTF8.self)
+        return name.isEmpty ? nil : name
+    }
 }

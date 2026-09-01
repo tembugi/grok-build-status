@@ -11,6 +11,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var displayLink: CADisplayLink?
     private var fallbackTimer: Timer?
     private var loginSwitch: AppleSwitch?
+    private var showSessionItem: NSMenuItem?
+    private var pendingShowSession = false
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
@@ -19,6 +21,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
+        menu.addItem(makeShowSessionItem())
+        menu.addItem(.separator())
         menu.addItem(makeLoginMenuItem())
         menu.addItem(.separator())
         let quit = NSMenuItem(
@@ -52,7 +56,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        showSessionItem?.isEnabled = SessionFocus.hasLiveSession()
         syncLoginSwitch()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard pendingShowSession else { return }
+        pendingShowSession = false
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            if !(await SessionFocus.bringSessionToFront()) {
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func makeShowSessionItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Show Session",
+            action: #selector(showSession),
+            keyEquivalent: ""
+        )
+        item.target = self
+        showSessionItem = item
+        return item
+    }
+
+    @objc private func showSession() {
+        pendingShowSession = true
     }
 
     private func makeLoginMenuItem() -> NSMenuItem {

@@ -79,6 +79,17 @@ struct GrokPathsTests {
     }
 }
 
+struct ProcessLivenessTests {
+    @Test func ttyNameOfMissingPidIsNil() {
+        #expect(ProcessLiveness.ttyName(of: 0) == nil)
+        #expect(ProcessLiveness.ttyName(of: -1) == nil)
+    }
+
+    @Test func parentOfInitIsNil() {
+        #expect(ProcessLiveness.parent(of: 1) == nil || ProcessLiveness.parent(of: 1) == 0)
+    }
+}
+
 struct EventFileReaderTests {
     @Test func tailsAppendsAndResetsOnTruncate() throws {
         let dir = FileManager.default.temporaryDirectory
