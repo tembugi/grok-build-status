@@ -3,19 +3,24 @@ import GrokStatusCore
 import QuartzCore
 
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSMenuDelegate {
     private let item: NSStatusItem
     private var light: TrafficLight = .inactive
     private var motion = IconMotion()
     private var appearanceObserver: NSKeyValueObservation?
     private var displayLink: CADisplayLink?
     private var fallbackTimer: Timer?
+    private var loginSwitch: NSSwitch?
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
         super.init()
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        menu.addItem(makeLoginMenuItem())
+        menu.addItem(.separator())
         let quit = NSMenuItem(
             title: "Quit Grok Status",
             action: #selector(NSApplication.terminate(_:)),
@@ -44,6 +49,47 @@ final class StatusItemController: NSObject {
         )
 
         render()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        syncLoginSwitch()
+    }
+
+    private func makeLoginMenuItem() -> NSMenuItem {
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 252, height: 32))
+        let label = NSTextField(labelWithString: "Start on login")
+        label.font = NSFont.menuFont(ofSize: 0)
+        label.frame = NSRect(x: 14, y: 6, width: 168, height: 20)
+        let toggle = NSSwitch()
+        toggle.controlSize = .regular
+        toggle.frame = NSRect(x: 196, y: 4, width: 44, height: 24)
+        toggle.target = self
+        toggle.action = #selector(toggleLogin(_:))
+        row.addSubview(label)
+        row.addSubview(toggle)
+        loginSwitch = toggle
+
+        let item = NSMenuItem()
+        item.view = row
+        return item
+    }
+
+    @objc private func toggleLogin(_ sender: NSSwitch) {
+        do {
+            try LoginItem.setEnabled(sender.state == .on)
+        } catch {
+            NSSound.beep()
+        }
+        syncLoginSwitch()
+    }
+
+    private func syncLoginSwitch() {
+        let installed = LoginItem.isInstalledInApplications
+        loginSwitch?.isEnabled = installed
+        loginSwitch?.state = LoginItem.isEnabled ? .on : .off
+        loginSwitch?.toolTip = installed
+            ? nil
+            : "Install Grok Status to the Applications folder to enable this."
     }
 
     @objc private func focusMayHaveChanged(_ notification: Notification) {
