@@ -160,6 +160,68 @@ struct StatusEvaluatorTests {
     }
 }
 
+struct WeeklyUsageTests {
+    @Test func parsesCreditsConfigLine() {
+        let line = """
+        {"ts":"2026-09-01T20:39:43.412Z","src":"shell","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":7.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-08-28T19:31:20.465165+00:00","end":"2026-09-04T19:31:20.465165+00:00"}},"subscriptionTier":"SuperGrok Heavy"}}
+        """
+        let usage = WeeklyUsage.parse(line: line)
+        #expect(usage?.usedPercent == 7)
+        #expect(usage?.period == .weekly)
+        #expect(usage?.tier == "SuperGrok Heavy")
+        #expect(usage?.percentLabel == "7%")
+        #expect(usage?.title == "Weekly usage")
+        #expect(usage?.periodEnd != nil)
+    }
+
+    @Test func latestLineWinsFromTail() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("weekly-usage-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = dir.appendingPathComponent("unified.jsonl")
+        try """
+        {"ts":"2026-09-01T10:00:00Z","msg":"other"}
+        {"ts":"2026-09-01T11:00:00Z","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":12},"subscriptionTier":"SuperGrok"}}
+        {"ts":"2026-09-01T12:00:00Z","msg":"noise"}
+        {"ts":"2026-09-01T13:00:00Z","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":18.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-09-08T00:00:00Z"}}}}
+
+        """.write(to: log, atomically: true, encoding: .utf8)
+        let usage = WeeklyUsage.latest(in: log)
+        #expect(usage?.usedPercent == 18)
+        #expect(usage?.period == .weekly)
+    }
+
+    @Test func missingLogIsNil() {
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("missing-unified-\(UUID().uuidString).jsonl")
+        #expect(WeeklyUsage.latest(in: log) == nil)
+    }
+
+    @Test func resetsPhrase() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let twoDays = now.addingTimeInterval(2 * 86_400 + 3 * 3_600)
+        #expect(WeeklyUsage.resetsPhrase(until: twoDays, now: now) == "resets in 2d 3h")
+        let fortyMinutes = now.addingTimeInterval(40 * 60)
+        #expect(WeeklyUsage.resetsPhrase(until: fortyMinutes, now: now) == "resets in 40m")
+        #expect(WeeklyUsage.resetsPhrase(until: now.addingTimeInterval(-10), now: now) == "reset due")
+    }
+
+    @Test func resetLabelIncludesDateAndTime() {
+        var usage = WeeklyUsage(
+            usedPercent: 7,
+            period: .weekly,
+            periodEnd: Date(timeIntervalSince1970: 1_788_546_680)
+        )
+        let now = Date(timeIntervalSince1970: 1_788_000_000)
+        let label = usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now)
+        #expect(label?.hasPrefix("Resets ") == true)
+        #expect(label?.contains(":") == true)
+        usage.periodEnd = now.addingTimeInterval(-60)
+        #expect(usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now) == "Reset due")
+    }
+}
+
 struct GrokMarkTests {
     @Test func officialGlyphFillsTheViewBox() {
         let box = GrokMark.cgPath().boundingBoxOfPath

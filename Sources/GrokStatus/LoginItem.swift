@@ -7,7 +7,8 @@ enum LoginItem {
     }
 
     static var isInstalledInApplications: Bool {
-        Bundle.main.bundleURL.path.hasPrefix("/Applications/")
+        let url = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        return url.deletingLastPathComponent().path == "/Applications"
     }
 
     static func setEnabled(_ enabled: Bool) throws {

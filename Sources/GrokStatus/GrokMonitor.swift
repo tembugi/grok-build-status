@@ -6,6 +6,7 @@ final class GrokMonitor: @unchecked Sendable {
     private let onChange: @Sendable (TrafficLight) -> Void
     private let queue = DispatchQueue(label: "dev.teemu.GrokStatus.monitor")
     private var watcher: FolderWatcher?
+    private var debounceWork: DispatchWorkItem?
     private var readers: [String: EventFileReader] = [:]
     private var lastSessions: [ActiveSession] = []
     private var lastLight: TrafficLight?
@@ -19,12 +20,31 @@ final class GrokMonitor: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.refresh()
-            let watcher = FolderWatcher(path: self.home.path, queue: self.queue) { [weak self] in
-                self?.refresh()
+            let watcher = FolderWatcher(
+                path: self.home.path,
+                queue: self.queue,
+                latency: 0.25,
+                fileEvents: true,
+                matching: Self.isSessionSignal
+            ) { [weak self] in
+                self?.scheduleRefresh()
             }
             watcher.start()
             self.watcher = watcher
         }
+    }
+
+    private static func isSessionSignal(_ path: String) -> Bool {
+        path.hasSuffix("active_sessions.json") || path.hasSuffix("/events.jsonl")
+    }
+
+    private func scheduleRefresh() {
+        debounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.refresh()
+        }
+        debounceWork = work
+        queue.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
     private func refresh() {

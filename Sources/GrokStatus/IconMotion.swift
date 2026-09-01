@@ -42,6 +42,19 @@ struct IconMotion {
             || abs(pulseAlpha - 1) > 0.02
     }
 
+    /// True while the icon still has motion, or while bounce/pulse must keep ticking.
+    func needsFrames(light: TrafficLight, focused: Bool) -> Bool {
+        if isSettling { return true }
+        switch light {
+        case .running:
+            return true
+        case .waitingForInput, .completed:
+            return !focused
+        default:
+            return false
+        }
+    }
+
     mutating func advance(light: TrafficLight, now: TimeInterval, focused: Bool) {
         let dt = min(now - (lastTime ?? now), 1.0 / 20.0)
         lastTime = now

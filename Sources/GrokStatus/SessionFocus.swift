@@ -4,10 +4,19 @@ import GrokStatusCore
 
 @MainActor
 enum SessionFocus {
+    private static var liveCache: (at: TimeInterval, sessions: [ActiveSession])?
+    private static var focusCache: (pid: pid_t, at: TimeInterval, value: Bool)?
+
     static func isGrokSessionFocused() -> Bool {
         guard let front = NSWorkspace.shared.frontmostApplication else { return false }
         let frontPID = front.processIdentifier
-        return liveSessions().contains { ProcessLiveness.isDescendant($0.pid, of: frontPID) }
+        let now = CFAbsoluteTimeGetCurrent()
+        if let focusCache, focusCache.pid == frontPID, now - focusCache.at < 0.12 {
+            return focusCache.value
+        }
+        let value = liveSessions().contains { ProcessLiveness.isDescendant($0.pid, of: frontPID) }
+        focusCache = (frontPID, now, value)
+        return value
     }
 
     static func hasLiveSession() -> Bool {
@@ -24,15 +33,10 @@ enum SessionFocus {
             app.unhide()
         }
 
-        if let tty = ProcessLiveness.ttyName(of: session.pid) {
-            switch app.bundleIdentifier {
-            case "com.apple.Terminal":
-                _ = activateTerminalTab(tty: tty)
-            case "com.googlecode.iterm2":
-                _ = activateITermSession(tty: tty)
-            default:
-                break
-            }
+        if let tty = ProcessLiveness.ttyName(of: session.pid),
+           let bundleID = app.bundleIdentifier
+        {
+            activateTTYHost(bundleID: bundleID, tty: tty)
         }
 
         await orderFront(app, cwd: session.cwd)
@@ -40,11 +44,29 @@ enum SessionFocus {
     }
 
     private static func liveSessions() -> [ActiveSession] {
-        let home = GrokPaths.home()
-        guard let sessions = ActiveSessions.load(from: GrokPaths.activeSessions(home: home)) else {
-            return []
+        let now = CFAbsoluteTimeGetCurrent()
+        if let liveCache, now - liveCache.at < 0.2 {
+            return liveCache.sessions
         }
-        return sessions.filter { ProcessLiveness.isAlive($0.pid) }
+        let home = GrokPaths.home()
+        guard let loaded = ActiveSessions.load(from: GrokPaths.activeSessions(home: home)) else {
+            return liveCache?.sessions ?? []
+        }
+        let live = loaded.filter { ProcessLiveness.isAlive($0.pid) }
+        liveCache = (now, live)
+        return live
+    }
+
+    /// Terminal hosts that can raise a tab by TTY. Add bundle IDs here.
+    private static func activateTTYHost(bundleID: String, tty: String) {
+        switch bundleID {
+        case "com.apple.Terminal":
+            _ = activateTerminalTab(tty: tty)
+        case "com.googlecode.iterm2":
+            _ = activateITermSession(tty: tty)
+        default:
+            break
+        }
     }
 
     private static func preferredLiveSession() -> ActiveSession? {

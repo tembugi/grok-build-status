@@ -12,6 +12,10 @@ public enum GrokPaths {
         home.appendingPathComponent("active_sessions.json")
     }
 
+    public static func unifiedLog(home: URL) -> URL {
+        home.appendingPathComponent("logs").appendingPathComponent("unified.jsonl")
+    }
+
     public static func eventsFile(home: URL, cwd: String, sessionId: String) -> URL {
         home
             .appendingPathComponent("sessions")

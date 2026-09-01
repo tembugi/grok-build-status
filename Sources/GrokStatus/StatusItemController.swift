@@ -4,6 +4,10 @@ import QuartzCore
 
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
+    private enum MenuLayout {
+        static let width: CGFloat = 252
+    }
+
     private let item: NSStatusItem
     private var light: TrafficLight = .inactive
     private var motion = IconMotion()
@@ -12,6 +16,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var fallbackTimer: Timer?
     private var loginSwitch: AppleSwitch?
     private var showSessionItem: NSMenuItem?
+    private var usageTitleField: NSTextField?
+    private var usagePercentField: NSTextField?
+    private var usageResetField: NSTextField?
+    private var usageRow: NSView?
     private var pendingShowSession = false
 
     override init() {
@@ -21,10 +29,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
+        // Session
         menu.addItem(makeShowSessionItem())
         menu.addItem(.separator())
+        // Status
+        menu.addItem(makeUsageMenuItem())
+        menu.addItem(.separator())
+        // Settings
         menu.addItem(makeLoginMenuItem())
         menu.addItem(.separator())
+        // App
         let quit = NSMenuItem(
             title: "Quit Grok Status",
             action: #selector(NSApplication.terminate(_:)),
@@ -57,6 +71,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         showSessionItem?.isEnabled = SessionFocus.hasLiveSession()
+        syncUsage()
         syncLoginSwitch()
     }
 
@@ -86,8 +101,51 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         pendingShowSession = true
     }
 
+    private func makeUsageMenuItem() -> NSMenuItem {
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 44))
+        let title = NSTextField(labelWithString: "Weekly usage")
+        title.font = NSFont.menuFont(ofSize: 0)
+        title.frame = NSRect(x: 14, y: 22, width: 150, height: 18)
+        let value = NSTextField(labelWithString: "—")
+        value.font = NSFont.monospacedDigitSystemFont(
+            ofSize: NSFont.systemFontSize,
+            weight: .regular
+        )
+        value.alignment = .right
+        value.frame = NSRect(x: 164, y: 22, width: 74, height: 18)
+        let reset = NSTextField(labelWithString: "")
+        reset.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+        reset.textColor = .secondaryLabelColor
+        reset.frame = NSRect(x: 14, y: 6, width: 224, height: 16)
+        row.addSubview(title)
+        row.addSubview(value)
+        row.addSubview(reset)
+        usageTitleField = title
+        usagePercentField = value
+        usageResetField = reset
+        usageRow = row
+
+        let item = NSMenuItem()
+        item.view = row
+        return item
+    }
+
+    private func syncUsage() {
+        guard let usage = WeeklyUsage.latest(in: GrokPaths.unifiedLog(home: GrokPaths.home())) else {
+            usageTitleField?.stringValue = "Weekly usage"
+            usagePercentField?.stringValue = "—"
+            usageResetField?.stringValue = ""
+            usageRow?.toolTip = "Usage appears after Grok fetches billing."
+            return
+        }
+        usageTitleField?.stringValue = usage.title
+        usagePercentField?.stringValue = usage.percentLabel
+        usageResetField?.stringValue = usage.resetLabel() ?? ""
+        usageRow?.toolTip = usage.tooltip
+    }
+
     private func makeLoginMenuItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 252, height: 32))
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 32))
         let label = NSTextField(labelWithString: "Start on login")
         label.font = NSFont.menuFont(ofSize: 0)
         label.frame = NSRect(x: 14, y: 6, width: 168, height: 20)
@@ -123,6 +181,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func focusMayHaveChanged(_ notification: Notification) {
+        if needsDisplayLink {
+            startAnimating()
+        }
         render()
     }
 
@@ -135,12 +196,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private var needsDisplayLink: Bool {
-        switch light {
-        case .running, .waitingForInput, .completed:
-            return true
-        default:
-            return motion.isSettling
-        }
+        motion.needsFrames(light: light, focused: SessionFocus.isGrokSessionFocused())
     }
 
     private func startAnimating() {

@@ -22,7 +22,7 @@ final class InstallLifetime {
         self.watcher = watcher
 
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.handleIfUninstalled()
             }
         }

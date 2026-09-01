@@ -5,11 +5,24 @@ final class FolderWatcher {
     private var stream: FSEventStreamRef?
     private let path: String
     private let queue: DispatchQueue
+    private let latency: CFTimeInterval
+    private let fileEvents: Bool
+    private let matching: ((String) -> Bool)?
     private let handler: () -> Void
 
-    init(path: String, queue: DispatchQueue, handler: @escaping () -> Void) {
+    init(
+        path: String,
+        queue: DispatchQueue,
+        latency: CFTimeInterval = 0.2,
+        fileEvents: Bool = false,
+        matching: ((String) -> Bool)? = nil,
+        handler: @escaping () -> Void
+    ) {
         self.path = path
         self.queue = queue
+        self.latency = latency
+        self.fileEvents = fileEvents
+        self.matching = matching
         self.handler = handler
     }
 
@@ -22,9 +35,14 @@ final class FolderWatcher {
             release: nil,
             copyDescription: nil
         )
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
             guard let info else { return }
-            Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue().handler()
+            Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue()
+                .handle(eventPaths: eventPaths)
+        }
+        var flags = UInt32(kFSEventStreamCreateFlagUseCFTypes)
+        if fileEvents {
+            flags |= UInt32(kFSEventStreamCreateFlagFileEvents)
         }
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
@@ -32,8 +50,8 @@ final class FolderWatcher {
             &context,
             [path] as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            0.2,
-            UInt32(kFSEventStreamCreateFlagUseCFTypes)
+            latency,
+            flags
         ) else {
             return
         }
@@ -52,5 +70,14 @@ final class FolderWatcher {
 
     deinit {
         stop()
+    }
+
+    private func handle(eventPaths: UnsafeMutableRawPointer) {
+        if let matching {
+            let paths = Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as NSArray
+            let hit = paths.compactMap { $0 as? String }.contains(where: matching)
+            guard hit else { return }
+        }
+        handler()
     }
 }
