@@ -15,7 +15,15 @@ final class StatusItemController: NSObject {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
         super.init()
 
-        item.menu = buildMenu()
+        let menu = NSMenu()
+        let quit = NSMenuItem(
+            title: "Quit Grok Status",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quit.target = NSApp
+        menu.addItem(quit)
+        item.menu = menu
 
         if let button = item.button {
             button.imagePosition = .imageOnly
@@ -28,45 +36,17 @@ final class StatusItemController: NSObject {
             }
         }
 
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(focusMayHaveChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+
         render()
     }
 
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        let cometRoot = NSMenuItem(title: "Comet", action: nil, keyEquivalent: "")
-        let cometMenu = NSMenu()
-        for style in CometStyle.allCases {
-            let entry = NSMenuItem(
-                title: style.title,
-                action: #selector(selectCometStyle(_:)),
-                keyEquivalent: ""
-            )
-            entry.target = self
-            entry.representedObject = style.rawValue
-            entry.state = CometStyle.current == style ? .on : .off
-            cometMenu.addItem(entry)
-        }
-        cometRoot.submenu = cometMenu
-        menu.addItem(cometRoot)
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(
-            title: "Quit Grok Status",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        quit.target = NSApp
-        menu.addItem(quit)
-        return menu
-    }
-
-    @objc private func selectCometStyle(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let style = CometStyle(rawValue: raw)
-        else { return }
-        CometStyle.current = style
-        item.menu = buildMenu()
+    @objc private func focusMayHaveChanged(_ notification: Notification) {
         render()
     }
 
@@ -118,7 +98,11 @@ final class StatusItemController: NSObject {
 
     private func render() {
         guard let button = item.button else { return }
-        motion.advance(light: light, now: CACurrentMediaTime())
+        motion.advance(
+            light: light,
+            now: CACurrentMediaTime(),
+            focused: SessionFocus.isGrokSessionFocused()
+        )
         let appearance = button.effectiveAppearance
         let scale = button.window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
@@ -126,8 +110,7 @@ final class StatusItemController: NSObject {
         button.image = GrokMarkImage.make(
             appearance: appearance,
             scale: scale,
-            pose: motion.pose,
-            cometStyle: CometStyle.current
+            pose: motion.pose
         )
         button.toolTip = light.tooltip
         button.setAccessibilityLabel(light.tooltip)

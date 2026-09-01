@@ -12,11 +12,14 @@ struct IconPose {
 struct IconMotion {
     private var comet: CGFloat = 0
     private var bounceY: CGFloat = 0
+    private var bounceVelocity: CGFloat = 0
     private var pulseScale: CGFloat = 1
+    private var pulseScaleVelocity: CGFloat = 0
     private var pulseAlpha: CGFloat = 1
-    private var bounceClock: TimeInterval = 0
+    private var pulseAlphaVelocity: CGFloat = 0
     private var pulseClock: TimeInterval = 0
     private var cometClock: TimeInterval = 0
+    private var bounceCooldown: TimeInterval = 0
     private var lastTime: TimeInterval?
     private var wasWaiting = false
     private var wasCompleted = false
@@ -34,44 +37,51 @@ struct IconMotion {
     var isSettling: Bool {
         comet > 0.02
             || abs(bounceY) > 0.12
+            || abs(bounceVelocity) > 2
             || abs(pulseScale - 1) > 0.01
             || abs(pulseAlpha - 1) > 0.02
     }
 
-    mutating func advance(light: TrafficLight, now: TimeInterval) {
+    mutating func advance(light: TrafficLight, now: TimeInterval, focused: Bool) {
         let dt = min(now - (lastTime ?? now), 1.0 / 20.0)
         lastTime = now
 
         let running = light == .running
         let waiting = light == .waitingForInput
         let completed = light == .completed
+        let attention = waiting && !focused
+        let celebrate = completed && !focused
 
-        if waiting, !wasWaiting { bounceClock = 0 }
+        if waiting, !wasWaiting { bounceCooldown = 0 }
         if completed, !wasCompleted { pulseClock = 0 }
         wasWaiting = waiting
         wasCompleted = completed
 
-        comet = mix(comet, running ? 1 : 0, tau: 0.2, dt: dt)
-
+        comet = mix(comet, running ? 1 : 0, tau: 0.22, dt: dt)
         if running || comet > 0.02 {
             cometClock += dt
         }
 
-        if waiting {
-            bounceClock += dt
-            bounceY = mix(bounceY, dockBounce(bounceClock), tau: 0.05, dt: dt)
+        if attention {
+            bounceCooldown -= dt
+            let settled = abs(bounceY) < 0.12 && abs(bounceVelocity) < 4
+            if bounceCooldown <= 0, settled {
+                bounceVelocity = 58
+                bounceCooldown = 1.55
+            }
+            spring(&bounceY, &bounceVelocity, toward: 0, dt: dt, stiffness: 210, damping: 9.5)
         } else {
-            bounceY = mix(bounceY, 0, tau: 0.14, dt: dt)
+            spring(&bounceY, &bounceVelocity, toward: 0, dt: dt, stiffness: 170, damping: 18)
         }
 
-        if completed {
+        if celebrate {
             pulseClock += dt
             let pulse = breathe(pulseClock)
-            pulseScale = mix(pulseScale, pulse.scale, tau: 0.1, dt: dt)
-            pulseAlpha = mix(pulseAlpha, pulse.alpha, tau: 0.1, dt: dt)
+            spring(&pulseScale, &pulseScaleVelocity, toward: pulse.scale, dt: dt, stiffness: 150, damping: 16)
+            spring(&pulseAlpha, &pulseAlphaVelocity, toward: pulse.alpha, dt: dt, stiffness: 150, damping: 16)
         } else {
-            pulseScale = mix(pulseScale, 1, tau: 0.16, dt: dt)
-            pulseAlpha = mix(pulseAlpha, 1, tau: 0.16, dt: dt)
+            spring(&pulseScale, &pulseScaleVelocity, toward: 1, dt: dt, stiffness: 170, damping: 18)
+            spring(&pulseAlpha, &pulseAlphaVelocity, toward: 1, dt: dt, stiffness: 170, damping: 18)
         }
     }
 
@@ -81,13 +91,18 @@ struct IconMotion {
         return current + (target - current) * k
     }
 
-    private func dockBounce(_ time: TimeInterval) -> CGFloat {
-        let cycle: TimeInterval = 1.7
-        let window: TimeInterval = 0.78
-        let t = time.truncatingRemainder(dividingBy: cycle)
-        if t >= window { return 0 }
-        let u = t / window
-        return 3.4 * abs(sin(u * .pi * 2.6)) * exp(-2.5 * u)
+    private func spring(
+        _ value: inout CGFloat,
+        _ velocity: inout CGFloat,
+        toward target: CGFloat,
+        dt: TimeInterval,
+        stiffness: CGFloat,
+        damping: CGFloat
+    ) {
+        let dt = CGFloat(dt)
+        let accel = stiffness * (target - value) - damping * velocity
+        velocity += accel * dt
+        value += velocity * dt
     }
 
     private func breathe(_ time: TimeInterval) -> (scale: CGFloat, alpha: CGFloat) {

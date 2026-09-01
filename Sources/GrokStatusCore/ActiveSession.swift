@@ -35,4 +35,25 @@ public enum ProcessLiveness {
         if kill(pid, 0) == 0 { return true }
         return errno == EPERM
     }
+
+    public static func parent(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let result = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+        guard result == 0, size > 0 else { return nil }
+        let parent = info.kp_eproc.e_ppid
+        return parent > 0 ? parent : nil
+    }
+
+    public static func isDescendant(_ pid: pid_t, of ancestor: pid_t) -> Bool {
+        var current = pid
+        for _ in 0..<24 {
+            if current == ancestor { return true }
+            guard let parent = parent(of: current), parent != current else { return false }
+            current = parent
+            if current <= 1 { return false }
+        }
+        return false
+    }
 }
