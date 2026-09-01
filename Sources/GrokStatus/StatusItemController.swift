@@ -10,7 +10,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var appearanceObserver: NSKeyValueObservation?
     private var displayLink: CADisplayLink?
     private var fallbackTimer: Timer?
-    private var loginSwitch: NSSwitch?
+    private var loginSwitch: AppleSwitch?
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
@@ -60,11 +60,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let label = NSTextField(labelWithString: "Start on login")
         label.font = NSFont.menuFont(ofSize: 0)
         label.frame = NSRect(x: 14, y: 6, width: 168, height: 20)
-        let toggle = NSSwitch()
-        toggle.controlSize = .regular
-        toggle.frame = NSRect(x: 196, y: 4, width: 44, height: 24)
+        let toggle = AppleSwitch(frame: NSRect(x: 198, y: 4, width: 40, height: 24))
         toggle.target = self
         toggle.action = #selector(toggleLogin(_:))
+        toggle.setAccessibilityLabel("Start on login")
         row.addSubview(label)
         row.addSubview(toggle)
         loginSwitch = toggle
@@ -74,7 +73,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return item
     }
 
-    @objc private func toggleLogin(_ sender: NSSwitch) {
+    @objc private func toggleLogin(_ sender: AppleSwitch) {
         do {
             try LoginItem.setEnabled(sender.state == .on)
         } catch {
@@ -86,7 +85,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func syncLoginSwitch() {
         let installed = LoginItem.isInstalledInApplications
         loginSwitch?.isEnabled = installed
-        loginSwitch?.state = LoginItem.isEnabled ? .on : .off
+        loginSwitch?.setOn(LoginItem.isEnabled, animated: false)
         loginSwitch?.toolTip = installed
             ? nil
             : "Install Grok Status to the Applications folder to enable this."
