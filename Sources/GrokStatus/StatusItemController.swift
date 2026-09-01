@@ -6,23 +6,16 @@ import QuartzCore
 final class StatusItemController: NSObject {
     private let item: NSStatusItem
     private var light: TrafficLight = .inactive
+    private var motion = IconMotion()
     private var appearanceObserver: NSKeyValueObservation?
     private var displayLink: CADisplayLink?
     private var fallbackTimer: Timer?
 
     override init() {
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
         super.init()
 
-        let menu = NSMenu()
-        let quit = NSMenuItem(
-            title: "Quit Grok Status",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        quit.target = NSApp
-        menu.addItem(quit)
-        item.menu = menu
+        item.menu = buildMenu()
 
         if let button = item.button {
             button.imagePosition = .imageOnly
@@ -38,25 +31,59 @@ final class StatusItemController: NSObject {
         render()
     }
 
-    func setLight(_ light: TrafficLight) {
-        let changed = light != self.light
-        self.light = light
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
 
-        if shouldAnimate {
-            startAnimating()
-            if changed { render() }
-        } else {
-            stopAnimating()
-            render()
+        let cometRoot = NSMenuItem(title: "Comet", action: nil, keyEquivalent: "")
+        let cometMenu = NSMenu()
+        for style in CometStyle.allCases {
+            let entry = NSMenuItem(
+                title: style.title,
+                action: #selector(selectCometStyle(_:)),
+                keyEquivalent: ""
+            )
+            entry.target = self
+            entry.representedObject = style.rawValue
+            entry.state = CometStyle.current == style ? .on : .off
+            cometMenu.addItem(entry)
         }
+        cometRoot.submenu = cometMenu
+        menu.addItem(cometRoot)
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(
+            title: "Quit Grok Status",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quit.target = NSApp
+        menu.addItem(quit)
+        return menu
     }
 
-    private var shouldAnimate: Bool {
+    @objc private func selectCometStyle(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let style = CometStyle(rawValue: raw)
+        else { return }
+        CometStyle.current = style
+        item.menu = buildMenu()
+        render()
+    }
+
+    func setLight(_ light: TrafficLight) {
+        self.light = light
+        if needsDisplayLink {
+            startAnimating()
+        }
+        render()
+    }
+
+    private var needsDisplayLink: Bool {
         switch light {
         case .running, .waitingForInput, .completed:
             return true
         default:
-            return false
+            return motion.isSettling
         }
     }
 
@@ -84,19 +111,23 @@ final class StatusItemController: NSObject {
 
     @objc private func tick(_ link: CADisplayLink) {
         render()
+        if !needsDisplayLink {
+            stopAnimating()
+        }
     }
 
     private func render() {
         guard let button = item.button else { return }
+        motion.advance(light: light, now: CACurrentMediaTime())
         let appearance = button.effectiveAppearance
         let scale = button.window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
         button.image = GrokMarkImage.make(
-            light,
             appearance: appearance,
             scale: scale,
-            time: CACurrentMediaTime()
+            pose: motion.pose,
+            cometStyle: CometStyle.current
         )
         button.toolTip = light.tooltip
         button.setAccessibilityLabel(light.tooltip)
