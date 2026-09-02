@@ -1,8 +1,11 @@
 # Grok Status
 
-Grok Build lives in a terminal. **Grok Status** lives in the menu bar, so you can look away and still know whether a session is running, done, or waiting for you.
+See **Grok Build** from the Mac menu bar, without watching the terminal.
 
-When Grok needs a permission or an answer, the icon bounces. Open the menu to jump back to that session, or to check weekly usage.
+- Tell at a glance if a session is idle, running, waiting for you, or done
+- Notice when Grok needs a permission or an answer — the icon bounces
+- Jump to a live session from the menu
+- Check weekly usage
 
 Unofficial. Not affiliated with SpaceXAI. You already need Grok Build.
 
