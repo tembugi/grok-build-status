@@ -432,6 +432,62 @@ struct WeeklyUsageTests {
     }
 }
 
+struct SessionAlertsTests {
+    private func row(_ id: String, _ light: TrafficLight, title: String? = nil) -> LiveSession {
+        LiveSession(
+            session: ActiveSession(sessionId: id, pid: 1, cwd: "/tmp/\(id)"),
+            light: light,
+            title: title ?? id
+        )
+    }
+
+    @Test func firstWaitingArrives() {
+        let alerts = SessionAlerts.arriving(
+            previous: ["a": .running],
+            sessions: [row("a", .waitingForInput, title: "demo")],
+            seenIDs: []
+        )
+        #expect(alerts == [SessionAlert(sessionId: "a", title: "demo", light: .waitingForInput)])
+        #expect(alerts.first?.body == "demo is waiting for input")
+    }
+
+    @Test func stillWaitingDoesNotRepeat() {
+        let alerts = SessionAlerts.arriving(
+            previous: ["a": .waitingForInput],
+            sessions: [row("a", .waitingForInput)],
+            seenIDs: []
+        )
+        #expect(alerts.isEmpty)
+    }
+
+    @Test func selectedTabIsSilent() {
+        let alerts = SessionAlerts.arriving(
+            previous: ["a": .running],
+            sessions: [row("a", .completed)],
+            seenIDs: ["a"]
+        )
+        #expect(alerts.isEmpty)
+    }
+
+    @Test func runningIsSilent() {
+        let alerts = SessionAlerts.arriving(
+            previous: ["a": .idle],
+            sessions: [row("a", .running)],
+            seenIDs: []
+        )
+        #expect(alerts.isEmpty)
+    }
+
+    @Test func newWaitingSessionArrives() {
+        let alerts = SessionAlerts.arriving(
+            previous: [:],
+            sessions: [row("b", .waitingForInput, title: "beta")],
+            seenIDs: []
+        )
+        #expect(alerts.map(\.sessionId) == ["b"])
+    }
+}
+
 struct AttentionFocusTests {
     private func row(_ id: String, _ light: TrafficLight) -> LiveSession {
         LiveSession(

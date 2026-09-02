@@ -33,6 +33,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var appearanceObserver: NSKeyValueObservation?
     private var animationTimer: Timer?
     private var loginSwitch: AppleSwitch?
+    private var notificationsSwitch: AppleSwitch?
+    private var primedAlerts = false
     private var sessionsHeaderItem: NSMenuItem?
     private var usageItem: NSMenuItem?
     private var usageRow: NSView?
@@ -57,6 +59,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         usageItem = usage
         menu.addItem(usage)
         menu.addItem(.separator())
+        menu.addItem(makeNotificationsMenuItem())
         menu.addItem(makeLoginMenuItem())
         menu.addItem(.separator())
         let quit = NSMenuItem(
@@ -98,6 +101,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             object: nil
         )
 
+        StatusNotifications.shared.start()
+        StatusNotifications.shared.onOpenSession = { [weak self] id in
+            self?.openSession(id: id)
+        }
+
         render()
     }
 
@@ -105,6 +113,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menuIsOpen = true
         rebuildSessionItems(in: menu)
         bindSnapshotToMenu()
+        syncNotificationsSwitch()
         syncLoginSwitch()
     }
 
@@ -169,16 +178,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func showSession(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-              let session = snapshot.sessions.first(where: { $0.session.sessionId == id })?.session
-        else { return }
+        guard let id = sender.representedObject as? String else { return }
         // Menu tracking uses a special run-loop mode. AppleScript to Terminal
         // is ignored until that mode ends. GCD's main queue runs in default
         // mode after the menu closes — that is the event, not a timer.
         DispatchQueue.main.async {
-            if !SessionFocus.bringSessionToFront(session) {
-                NSSound.beep()
-            }
+            self.openSession(id: id)
+        }
+    }
+
+    private func openSession(id: String) {
+        guard let session = snapshot.sessions.first(where: { $0.session.sessionId == id })?.session
+        else {
+            NSSound.beep()
+            return
+        }
+        if !SessionFocus.bringSessionToFront(session) {
+            NSSound.beep()
         }
     }
 
@@ -212,8 +228,37 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         row.toolTip = usage.tooltip
     }
 
+    private func makeNotificationsMenuItem() -> NSMenuItem {
+        let row = SwitchMenuRow(title: "Notifications")
+        row.toggle.target = self
+        row.toggle.action = #selector(toggleNotifications(_:))
+        row.toggle.setAccessibilityLabel("Notifications")
+        notificationsSwitch = row.toggle
+        syncNotificationsSwitch()
+
+        let item = NSMenuItem()
+        item.view = row
+        return item
+    }
+
+    @objc private func toggleNotifications(_ sender: AppleSwitch) {
+        StatusNotifications.shared.setEnabled(sender.state == .on) { granted in
+            if sender.state == .on, !granted {
+                NSSound.beep()
+            }
+            self.syncNotificationsSwitch()
+        }
+    }
+
+    private func syncNotificationsSwitch() {
+        notificationsSwitch?.setOn(StatusNotifications.shared.isEnabled, animated: false)
+        notificationsSwitch?.toolTip = StatusNotifications.shared.isEnabled
+            ? nil
+            : "Mac notifications when Grok is waiting or done."
+    }
+
     private func makeLoginMenuItem() -> NSMenuItem {
-        let row = LoginMenuRow()
+        let row = SwitchMenuRow(title: "Start on login")
         row.toggle.target = self
         row.toggle.action = #selector(toggleLogin(_:))
         row.toggle.setAccessibilityLabel("Start on login")
@@ -273,11 +318,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func apply(_ snapshot: SessionSnapshot) {
+        let previousLights = lightsByID
         let finishedWhileRunning = reconcileSeen(with: snapshot)
         let idsChanged = Set(self.snapshot.sessions.map(\.session.sessionId))
             != Set(snapshot.sessions.map(\.session.sessionId))
         self.snapshot = snapshot
         noteSelectedTab()
+        if primedAlerts {
+            StatusNotifications.shared.post(
+                SessionAlerts.arriving(
+                    previous: previousLights,
+                    sessions: snapshot.sessions,
+                    seenIDs: seenIDs
+                )
+            )
+        }
+        primedAlerts = true
         if finishedWhileRunning, iconVisible {
             motion.tapPulse()
         }
@@ -664,13 +720,13 @@ private final class UsageMenuRow: MenuItemRowView {
     }
 }
 
-private final class LoginMenuRow: MenuItemRowView {
+private final class SwitchMenuRow: MenuItemRowView {
     let labelField: NSTextField
     let toggle: AppleSwitch
 
-    init() {
+    init(title: String) {
         labelField = menuLabel(font: MenuLayout.rowFont)
-        labelField.stringValue = "Start on login"
+        labelField.stringValue = title
         toggle = AppleSwitch(frame: NSRect(x: 0, y: 0, width: 40, height: 24))
         super.init(height: 32)
         addSubview(labelField)
