@@ -206,6 +206,109 @@ struct EventFileReaderTests {
         reader.readNew(from: file)
         #expect(reader.state.light == .running)
     }
+
+    @Test func missingFileResetsState() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("events.jsonl")
+
+        try #"{"type":"turn_started"}\#n"#.write(to: file, atomically: true, encoding: .utf8)
+        let reader = EventFileReader()
+        reader.readNew(from: file)
+        #expect(reader.state.light == .running)
+
+        try FileManager.default.removeItem(at: file)
+        reader.readNew(from: file)
+        #expect(reader.state.light == .idle)
+        #expect(reader.state.turnOpen == false)
+    }
+
+    @Test func rereadDoesNotDoubleCountAskUser() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("events.jsonl")
+
+        try #"{"type":"turn_started"}\#n{"type":"tool_started","tool_name":"ask_user_question"}\#n"#
+            .write(to: file, atomically: true, encoding: .utf8)
+        let reader = EventFileReader()
+        reader.readNew(from: file)
+        #expect(reader.state.light == .waitingForInput)
+        #expect(reader.state.openAskTools == 1)
+
+        reader.readNew(from: file)
+        #expect(reader.state.openAskTools == 1)
+
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"type":"tool_completed","tool_name":"ask_user_question"}\#n"#.utf8))
+        try handle.close()
+        reader.readNew(from: file)
+        #expect(reader.state.openAskTools == 0)
+        #expect(reader.state.light == .running)
+    }
+
+    @Test func holdsIncompleteLastLine() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("events.jsonl")
+
+        try #"{"type":"turn_started"}"#.write(to: file, atomically: true, encoding: .utf8)
+        let reader = EventFileReader()
+        reader.readNew(from: file)
+        #expect(reader.state.light == .idle)
+
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n".utf8))
+        try handle.close()
+        reader.readNew(from: file)
+        #expect(reader.state.light == .running)
+    }
+}
+
+struct ActiveSessionsLoadTests {
+    @Test func missingFileIsEmpty() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-sessions-missing-\(UUID().uuidString).json")
+        let loaded = ActiveSessions.load(from: url)
+        #expect(loaded != nil)
+        #expect(loaded == [])
+    }
+
+    @Test func emptyFileIsEmpty() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-sessions-empty-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data().write(to: url)
+        let loaded = ActiveSessions.load(from: url)
+        #expect(loaded != nil)
+        #expect(loaded == [])
+    }
+
+    @Test func invalidJSONIsNil() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-sessions-bad-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[".write(to: url, atomically: true, encoding: .utf8)
+        #expect(ActiveSessions.load(from: url) == nil)
+    }
+
+    @Test func validJSONDecodesAndIgnoresUnknownKeys() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-sessions-ok-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try """
+        [{"session_id":"abc","pid":42,"cwd":"/tmp/demo","opened_at":"2026-09-01T00:00:00Z"}]
+        """.write(to: url, atomically: true, encoding: .utf8)
+        let loaded = ActiveSessions.load(from: url)
+        #expect(loaded == [ActiveSession(sessionId: "abc", pid: 42, cwd: "/tmp/demo")])
+    }
 }
 
 struct StatusEvaluatorTests {
@@ -305,12 +408,11 @@ struct WeeklyUsageTests {
             period: .weekly,
             periodEnd: Date(timeIntervalSince1970: 1_788_546_680)
         )
-        let now = Date(timeIntervalSince1970: 1_788_000_000)
-        let label = usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now)
+        let label = usage.resetLabel(locale: Locale(identifier: "en_GB"))
         #expect(label?.hasPrefix("Resets ") == true)
         #expect(label?.contains(":") == true)
-        usage.periodEnd = now.addingTimeInterval(-60)
-        let past = usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now)
+        usage.periodEnd = Date(timeIntervalSince1970: 1_788_000_000)
+        let past = usage.resetLabel(locale: Locale(identifier: "en_GB"))
         #expect(past?.hasPrefix("Resets ") == true)
         #expect(past?.contains(":") == true)
     }

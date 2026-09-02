@@ -164,8 +164,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return item
     }
 
-    private func sessionsCountLabel(_ count: Int) -> String {
-        count == 0 ? "None" : "\(count) active"
+    private func sessionsCountLabel(_ sessions: [LiveSession]) -> String {
+        TrafficLight.countSummary(sessions.map(\.light)) ?? "None"
     }
 
     @objc private func showSession(_ sender: NSMenuItem) {
@@ -274,6 +274,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func apply(_ snapshot: SessionSnapshot) {
         let finishedWhileRunning = reconcileSeen(with: snapshot)
+        let idsChanged = Set(self.snapshot.sessions.map(\.session.sessionId))
+            != Set(snapshot.sessions.map(\.session.sessionId))
         self.snapshot = snapshot
         noteSelectedTab()
         if finishedWhileRunning, iconVisible {
@@ -284,6 +286,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         render()
         if menuIsOpen {
+            if idsChanged, let menu = item.menu {
+                rebuildSessionItems(in: menu)
+            }
             bindSnapshotToMenu()
         }
     }
@@ -293,7 +298,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func bindSnapshotToMenu() {
         guard let menu = item.menu else { return }
         if let header = sessionsHeaderItem?.view as? KeyedMenuRow {
-            header.setTitle("Sessions", value: sessionsCountLabel(snapshot.sessions.count))
+            header.setTitle("Sessions", value: sessionsCountLabel(snapshot.sessions))
         }
         for item in menu.items {
             guard let id = item.representedObject as? String,

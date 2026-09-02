@@ -278,28 +278,4 @@ enum SessionFocus {
             return nil
         }
     }
-
-    private static func runAppleScript(_ source: String) -> Bool {
-        var error: NSDictionary?
-        if let script = NSAppleScript(source: source) {
-            _ = script.executeAndReturnError(&error)
-            if error == nil { return true }
-        }
-        return runOsascript(source)
-    }
-
-    private static func runOsascript(_ source: String) -> Bool {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", source]
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            return proc.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
 }

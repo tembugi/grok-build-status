@@ -46,17 +46,6 @@ public enum ProcessLiveness {
         return parent > 0 ? parent : nil
     }
 
-    public static func isDescendant(_ pid: pid_t, of ancestor: pid_t) -> Bool {
-        var current = pid
-        for _ in 0..<24 {
-            if current == ancestor { return true }
-            guard let parent = parent(of: current), parent != current else { return false }
-            current = parent
-            if current <= 1 { return false }
-        }
-        return false
-    }
-
     public static func normalizedTTY(_ name: String?) -> String? {
         guard let name else { return nil }
         let trimmed = name.split(separator: "/").last.map(String.init) ?? name

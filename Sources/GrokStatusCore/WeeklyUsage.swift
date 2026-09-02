@@ -43,7 +43,7 @@ public struct WeeklyUsage: Equatable, Sendable {
         }
     }
 
-    public func resetLabel(locale: Locale = .current, now: Date = Date()) -> String? {
+    public func resetLabel(locale: Locale = .current) -> String? {
         guard let periodEnd else { return nil }
         let formatter = DateFormatter()
         formatter.locale = locale

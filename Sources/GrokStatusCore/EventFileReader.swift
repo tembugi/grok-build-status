@@ -8,7 +8,10 @@ public final class EventFileReader: @unchecked Sendable {
     public init() {}
 
     public func readNew(from url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            reset()
+            return
+        }
         let size: UInt64
         if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
            let value = attrs[.size] as? NSNumber
@@ -19,9 +22,7 @@ public final class EventFileReader: @unchecked Sendable {
         }
         if size == offset { return }
         if size < offset {
-            offset = 0
-            pending = Data()
-            state = SessionRuntimeState()
+            reset()
         }
 
         guard let handle = try? FileHandle(forReadingFrom: url) else { return }
@@ -29,11 +30,19 @@ public final class EventFileReader: @unchecked Sendable {
         do {
             try handle.seek(toOffset: offset)
             let data = try handle.readToEnd() ?? Data()
-            offset = size
+            // Advance by bytes actually read, not the size sampled before
+            // the read — the file can grow in between.
+            offset += UInt64(data.count)
             ingest(data)
         } catch {
             return
         }
+    }
+
+    private func reset() {
+        offset = 0
+        pending = Data()
+        state = SessionRuntimeState()
     }
 
     public func ingest(_ data: Data) {
