@@ -10,14 +10,14 @@ Not affiliated with SpaceXAI.
 
 Mac with Apple Silicon, macOS 14 or later.
 
-**Just the app** — download [Grok Status.dmg](https://github.com/tembugi/grok-build-status/releases/latest) from the latest GitHub Release, open it, and drag **Grok Status** onto Applications. No source or compiling.
+**Just the app** — download [GrokStatus.dmg](https://github.com/tembugi/grok-build-status/releases/latest) from the latest GitHub Release, open it, and drag **Grok Status** onto Applications. No source or compiling.
 
 The first launch may be blocked as an unidentified developer. Right-click the app, choose Open, then Open again.
 
 **From source** (after you change the code). Needs the Swift toolchain (Xcode or Command Line Tools):
 
 1. `./package.sh`
-2. Open `dist/Grok Status.dmg`
+2. Open `dist/GrokStatus.dmg`
 3. Drag **Grok Status** onto Applications
 
 To start at login, open the menu extra and turn on **Start on login** (only after the app is in Applications).

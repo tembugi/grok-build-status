@@ -1,11 +1,11 @@
 #!/bin/zsh
-# Build dist/Grok Status.dmg (drag the app onto Applications).
+# Build dist/GrokStatus.dmg (drag the app onto Applications).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Grok Status"
 STAGE="$(mktemp -d /tmp/grok-status-dmg.XXXXXX)"
-OUT="$PWD/dist/${APP_NAME}.dmg"
+OUT="$PWD/dist/GrokStatus.dmg"
 
 cleanup() {
   rm -rf "$STAGE"
@@ -17,7 +17,7 @@ mkdir -p dist
 ln -s /Applications "$STAGE/Applications"
 cp "$PWD/Resources/dmg/DS_Store" "$STAGE/.DS_Store"
 
-rm -f "$OUT"
+rm -f "$OUT" "$PWD/dist/${APP_NAME}.dmg"
 hdiutil create -ov -volname "$APP_NAME" -fs HFS+ -srcfolder "$STAGE" \
   -format UDZO -imagekey zlib-level=9 "$OUT" >/dev/null
 echo "Created $OUT"
