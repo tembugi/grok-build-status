@@ -19,27 +19,36 @@ enum SessionFocus {
         return value
     }
 
-    static func hasLiveSession() -> Bool {
-        !liveSessions().isEmpty
-    }
-
-    /// Raises the host window of the most urgent live Grok session.
+    /// Raises the host window / terminal tab of the given live Grok session.
     @discardableResult
-    static func bringSessionToFront() async -> Bool {
-        guard let session = preferredLiveSession() else { return false }
+    static func bringSessionToFront(_ session: ActiveSession) async -> Bool {
         guard let app = hostApplication(for: session.pid) else { return false }
 
         if app.isHidden {
             app.unhide()
         }
 
-        if let tty = ProcessLiveness.ttyName(of: session.pid),
-           let bundleID = app.bundleIdentifier
-        {
-            activateTTYHost(bundleID: bundleID, tty: tty)
+        let tty = ProcessLiveness.ttyName(of: session.pid)
+        let bundleID = app.bundleIdentifier
+        var selectedTab = false
+        if let tty, let bundleID {
+            selectedTab = activateTTYHost(bundleID: bundleID, tty: tty)
         }
 
-        await orderFront(app, cwd: session.cwd)
+        NSApp.yieldActivation(to: app)
+        carbonSetFront(pid: app.processIdentifier)
+        _ = app.activate(from: NSRunningApplication.current, options: [.activateAllWindows])
+
+        // Tab hosts: AppleScript already selected the tab. Don't open the app
+        // again — that brings the front tab, not the one we just selected.
+        if !selectedTab {
+            if let url = app.bundleURL {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            }
+            axRaise(app, cwd: session.cwd)
+        }
         return true
     }
 
@@ -58,28 +67,15 @@ enum SessionFocus {
     }
 
     /// Terminal hosts that can raise a tab by TTY. Add bundle IDs here.
-    private static func activateTTYHost(bundleID: String, tty: String) {
+    private static func activateTTYHost(bundleID: String, tty: String) -> Bool {
         switch bundleID {
         case "com.apple.Terminal":
-            _ = activateTerminalTab(tty: tty)
+            return activateTerminalTab(tty: tty)
         case "com.googlecode.iterm2":
-            _ = activateITermSession(tty: tty)
+            return activateITermSession(tty: tty)
         default:
-            break
+            return false
         }
-    }
-
-    private static func preferredLiveSession() -> ActiveSession? {
-        let home = GrokPaths.home()
-        return liveSessions().max { a, b in
-            light(for: a, home: home).rawValue < light(for: b, home: home).rawValue
-        }
-    }
-
-    private static func light(for session: ActiveSession, home: URL) -> TrafficLight {
-        let reader = EventFileReader()
-        reader.readNew(from: GrokPaths.eventsFile(home: home, cwd: session.cwd, sessionId: session.sessionId))
-        return reader.state.light
     }
 
     private static func hostApplication(for pid: pid_t) -> NSRunningApplication? {
@@ -101,20 +97,6 @@ enum SessionFocus {
             current = parent
         }
         return fallback
-    }
-
-    private static func orderFront(_ app: NSRunningApplication, cwd: String) async {
-        NSApp.yieldActivation(to: app)
-        carbonSetFront(pid: app.processIdentifier)
-
-        if let url = app.bundleURL {
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
-        }
-
-        _ = app.activate(from: NSRunningApplication.current, options: [.activateAllWindows])
-        axRaise(app, cwd: cwd)
     }
 
     /// HIServices SetFrontProcessWithOptions is unavailable in Swift; call it by symbol.
@@ -169,7 +151,13 @@ enum SessionFocus {
                             try
                                 set miniaturized of w to false
                             end try
+                            try
+                                set visible of w to true
+                            end try
                             set selected tab of w to t
+                            try
+                                set selected of t to true
+                            end try
                             set index of w to 1
                             try
                                 set frontmost of w to true

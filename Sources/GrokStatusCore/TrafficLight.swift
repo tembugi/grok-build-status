@@ -30,7 +30,44 @@ public enum TrafficLight: Int, Sendable, Equatable {
         }
     }
 
+    public var menuLabel: String {
+        switch self {
+        case .inactive: "Not running"
+        case .idle: "Idle"
+        case .completed: "Done"
+        case .running: "Running"
+        case .waitingForInput: "Waiting"
+        }
+    }
+
     public func combining(_ other: TrafficLight) -> TrafficLight {
         self.rawValue >= other.rawValue ? self : other
+    }
+
+    /// Compact roster line such as `2 running · 1 waiting`.
+    public static func countSummary(_ lights: [TrafficLight]) -> String? {
+        var waiting = 0
+        var running = 0
+        var done = 0
+        var idle = 0
+        for light in lights {
+            switch light {
+            case .waitingForInput: waiting += 1
+            case .running: running += 1
+            case .completed: done += 1
+            case .idle: idle += 1
+            case .inactive: break
+            }
+        }
+        var parts: [String] = []
+        func add(_ count: Int, _ word: String) {
+            guard count > 0 else { return }
+            parts.append("\(count) \(word)")
+        }
+        add(waiting, "waiting")
+        add(running, "running")
+        add(done, "done")
+        add(idle, "idle")
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

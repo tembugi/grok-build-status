@@ -16,12 +16,21 @@ public enum GrokPaths {
         home.appendingPathComponent("logs").appendingPathComponent("unified.jsonl")
     }
 
-    public static func eventsFile(home: URL, cwd: String, sessionId: String) -> URL {
+    public static func sessionDirectory(home: URL, cwd: String, sessionId: String) -> URL {
         home
             .appendingPathComponent("sessions")
             .appendingPathComponent(encodeCwd(cwd))
             .appendingPathComponent(sessionId)
+    }
+
+    public static func eventsFile(home: URL, cwd: String, sessionId: String) -> URL {
+        sessionDirectory(home: home, cwd: cwd, sessionId: sessionId)
             .appendingPathComponent("events.jsonl")
+    }
+
+    public static func summaryFile(home: URL, cwd: String, sessionId: String) -> URL {
+        sessionDirectory(home: home, cwd: cwd, sessionId: sessionId)
+            .appendingPathComponent("summary.json")
     }
 
     /// Matches Grok's session-group folder names (`urllib.parse.quote(cwd, safe="")`).

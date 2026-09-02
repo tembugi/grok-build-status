@@ -40,7 +40,7 @@ enum GrokMarkImage {
             let snap = abs(pose.pulseScale - 1) < 0.02
 
             if showComet {
-                drawOrbitProfessional(in: rect, time: pose.cometTime, strength: pose.comet, behind: true)
+                drawOrbit(in: rect, time: pose.cometTime, strength: pose.comet, behind: true)
                 punchMark(in: rect)
             }
 
@@ -53,7 +53,7 @@ enum GrokMarkImage {
             )
 
             if showComet {
-                drawOrbitProfessional(in: rect, time: pose.cometTime, strength: pose.comet, behind: false)
+                drawOrbit(in: rect, time: pose.cometTime, strength: pose.comet, behind: false)
             }
         }
 
@@ -120,7 +120,7 @@ enum GrokMarkImage {
         var u: CGFloat
     }
 
-    private static func drawOrbitProfessional(
+    private static func drawOrbit(
         in rect: NSRect,
         time: TimeInterval,
         strength: CGFloat,

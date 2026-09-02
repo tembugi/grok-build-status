@@ -3,15 +3,18 @@ import GrokStatusCore
 
 final class GrokMonitor: @unchecked Sendable {
     private let home: URL
-    private let onChange: @Sendable (TrafficLight) -> Void
+    private let onChange: @Sendable (TrafficLight, [SessionState]) -> Void
     private let queue = DispatchQueue(label: "dev.teemu.GrokStatus.monitor")
     private var watcher: FolderWatcher?
     private var debounceWork: DispatchWorkItem?
     private var readers: [String: EventFileReader] = [:]
     private var lastSessions: [ActiveSession] = []
-    private var lastLight: TrafficLight?
+    private var lastSignature: [String: Int] = [:]
 
-    init(home: URL = GrokPaths.home(), onChange: @escaping @Sendable (TrafficLight) -> Void) {
+    init(
+        home: URL = GrokPaths.home(),
+        onChange: @escaping @Sendable (TrafficLight, [SessionState]) -> Void
+    ) {
         self.home = home
         self.onChange = onChange
     }
@@ -57,6 +60,9 @@ final class GrokMonitor: @unchecked Sendable {
         readers = readers.filter { liveIDs.contains($0.key) }
 
         var light = TrafficLight.inactive
+        var signature: [String: Int] = [:]
+        var states: [SessionState] = []
+        states.reserveCapacity(live.count)
         for session in live {
             let reader = readers[session.sessionId] ?? EventFileReader()
             reader.readNew(
@@ -64,11 +70,13 @@ final class GrokMonitor: @unchecked Sendable {
             )
             readers[session.sessionId] = reader
             light = light.combining(reader.state.light)
+            signature[session.sessionId] = reader.state.light.rawValue
+            states.append(SessionState(session: session, light: reader.state.light))
         }
 
-        if light != lastLight {
-            lastLight = light
-            onChange(light)
+        if signature != lastSignature {
+            lastSignature = signature
+            onChange(light, states)
         }
     }
 }

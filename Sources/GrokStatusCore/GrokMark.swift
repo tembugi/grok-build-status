@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Official Grok glyph, taken from https://grok.com/images/favicon.svg
+/// Official Grok icon (SpaceXAI). From https://grok.com/images/favicon.svg
 public enum GrokMark {
     public static let viewBox: CGFloat = 512
 

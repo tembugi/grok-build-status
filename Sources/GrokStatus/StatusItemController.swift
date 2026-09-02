@@ -15,12 +15,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var displayLink: CADisplayLink?
     private var fallbackTimer: Timer?
     private var loginSwitch: AppleSwitch?
-    private var showSessionItem: NSMenuItem?
+    private var usageItem: NSMenuItem?
     private var usageTitleField: NSTextField?
     private var usagePercentField: NSTextField?
     private var usageResetField: NSTextField?
     private var usageRow: NSView?
-    private var pendingShowSession = false
+    private var roster: [LiveSession] = []
+    private var sessionStates: [SessionState] = []
+    private var pendingSession: ActiveSession?
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
@@ -29,16 +31,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
-        // Session
-        menu.addItem(makeShowSessionItem())
+        let usage = makeUsageMenuItem()
+        usageItem = usage
+        menu.addItem(usage)
         menu.addItem(.separator())
-        // Status
-        menu.addItem(makeUsageMenuItem())
-        menu.addItem(.separator())
-        // Settings
         menu.addItem(makeLoginMenuItem())
         menu.addItem(.separator())
-        // App
         let quit = NSMenuItem(
             title: "Quit Grok Status",
             action: #selector(NSApplication.terminate(_:)),
@@ -69,36 +67,67 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         render()
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        showSessionItem?.isEnabled = SessionFocus.hasLiveSession()
+    func menuWillOpen(_ menu: NSMenu) {
+        roster = SessionRoster.labeled(sessionStates, home: GrokPaths.home())
+        rebuildSessionItems(in: menu)
         syncUsage()
         syncLoginSwitch()
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        guard pendingShowSession else { return }
-        pendingShowSession = false
+        guard let session = pendingSession else { return }
+        pendingSession = nil
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
-            if !(await SessionFocus.bringSessionToFront()) {
+            try? await Task.sleep(for: .milliseconds(300))
+            if !(await SessionFocus.bringSessionToFront(session)) {
                 NSSound.beep()
             }
         }
     }
 
-    private func makeShowSessionItem() -> NSMenuItem {
-        let item = NSMenuItem(
-            title: "Show Session",
-            action: #selector(showSession),
-            keyEquivalent: ""
-        )
-        item.target = self
-        showSessionItem = item
+    private func rebuildSessionItems(in menu: NSMenu) {
+        guard let usageItem else { return }
+        while let first = menu.items.first, first !== usageItem {
+            menu.removeItem(first)
+        }
+
+        var items: [NSMenuItem] = []
+        if roster.isEmpty {
+            items.append(disabledSessionItem("No sessions"))
+        } else {
+            if roster.count > 1, let summary = TrafficLight.countSummary(roster.map(\.light)) {
+                items.append(disabledSessionItem(summary))
+            }
+            for row in roster {
+                let item = NSMenuItem(
+                    title: row.menuTitle,
+                    action: #selector(showSession(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.isEnabled = true
+                item.representedObject = row.session.sessionId
+                item.toolTip = row.light.tooltip
+                items.append(item)
+            }
+        }
+        items.append(.separator())
+
+        for (offset, item) in items.enumerated() {
+            menu.insertItem(item, at: offset)
+        }
+    }
+
+    private func disabledSessionItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
         return item
     }
 
-    @objc private func showSession() {
-        pendingShowSession = true
+    @objc private func showSession(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        pendingSession = roster.first { $0.session.sessionId == id }?.session
+            ?? sessionStates.first { $0.session.sessionId == id }?.session
     }
 
     private func makeUsageMenuItem() -> NSMenuItem {
@@ -187,8 +216,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         render()
     }
 
-    func setLight(_ light: TrafficLight) {
+    func setLight(_ light: TrafficLight, sessions: [SessionState] = []) {
         self.light = light
+        self.sessionStates = sessions
         if needsDisplayLink {
             startAnimating()
         }
@@ -244,7 +274,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             scale: scale,
             pose: motion.pose
         )
-        button.toolTip = light.tooltip
-        button.setAccessibilityLabel(light.tooltip)
+        let tip = iconTooltip()
+        button.toolTip = tip
+        button.setAccessibilityLabel(tip)
+    }
+
+    private func iconTooltip() -> String {
+        if sessionStates.count > 1, let summary = TrafficLight.countSummary(sessionStates.map(\.light)) {
+            return summary
+        }
+        return (sessionStates.first?.light ?? light).tooltip
     }
 }

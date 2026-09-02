@@ -38,7 +38,7 @@ struct SessionRuntimeStateTests {
         #expect(state.light == .waitingForInput)
     }
 
-    @Test func autoApprovedPermissionDoesNotStayRed() {
+    @Test func autoApprovedPermissionReturnsToRunning() {
         var state = SessionRuntimeState()
         state.apply(EventLine(type: "turn_started"))
         state.apply(EventLine(type: "phase_changed", phase: "permission_prompt"))
@@ -61,20 +61,105 @@ struct SessionRuntimeStateTests {
         #expect(state.light == .running)
     }
 
-    @Test func redOutranksYellow() {
+    @Test func combiningPicksHigherPriority() {
         #expect(TrafficLight.running.combining(.waitingForInput) == .waitingForInput)
         #expect(TrafficLight.idle.combining(.running) == .running)
         #expect(TrafficLight.inactive.combining(.idle) == .idle)
         #expect(TrafficLight.completed.combining(.running) == .running)
         #expect(TrafficLight.idle.combining(.completed) == .completed)
     }
+
+    @Test func countSummary() {
+        #expect(TrafficLight.countSummary([]) == nil)
+        #expect(TrafficLight.countSummary([.inactive]) == nil)
+        #expect(TrafficLight.countSummary([.running]) == "1 running")
+        #expect(
+            TrafficLight.countSummary([.running, .running, .waitingForInput, .completed, .idle])
+                == "1 waiting · 2 running · 1 done · 1 idle"
+        )
+    }
+}
+
+struct SessionRosterTests {
+    @Test func listsAndSortsLiveSessions() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grok-status-roster-\(UUID().uuidString)")
+        let alpha = "/Users/alex/Projects/alpha"
+        let beta = "/Users/alex/Projects/beta"
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        try writeSession(
+            home: home,
+            cwd: alpha,
+            id: "session-a",
+            events: #"{"type":"turn_started"}\#n{"type":"turn_ended"}\#n"#
+        )
+        try writeSession(
+            home: home,
+            cwd: beta,
+            id: "session-b",
+            events: #"{"type":"turn_started"}\#n{"type":"permission_requested","tool_name":"run_terminal_command"}\#n"#
+        )
+
+        let rows = SessionRoster.snapshots(
+            of: [
+                ActiveSession(sessionId: "session-a", pid: 1, cwd: alpha),
+                ActiveSession(sessionId: "session-b", pid: 2, cwd: beta),
+            ],
+            home: home
+        )
+        #expect(rows.map(\.title) == ["beta", "alpha"])
+        #expect(rows.map(\.light) == [.waitingForInput, .completed])
+        #expect(rows[0].menuTitle == "beta — Waiting")
+        #expect(rows[1].menuTitle == "alpha — Done")
+    }
+
+    @Test func disambiguatesSameFolderWithGeneratedTitle() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grok-status-roster-dup-\(UUID().uuidString)")
+        let cwd = "/Users/alex/Projects/demo"
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        try writeSession(home: home, cwd: cwd, id: "session-a", events: "", title: "Fix login")
+        try writeSession(home: home, cwd: cwd, id: "session-b", events: "", title: "Write tests")
+
+        let rows = SessionRoster.snapshots(
+            of: [
+                ActiveSession(sessionId: "session-a", pid: 1, cwd: cwd),
+                ActiveSession(sessionId: "session-b", pid: 2, cwd: cwd),
+            ],
+            home: home
+        )
+        #expect(rows.map(\.title).sorted() == ["demo — Fix login", "demo — Write tests"])
+    }
+
+    private func writeSession(
+        home: URL,
+        cwd: String,
+        id: String,
+        events: String,
+        title: String? = nil
+    ) throws {
+        let dir = GrokPaths.sessionDirectory(home: home, cwd: cwd, sessionId: id)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try events.write(to: GrokPaths.eventsFile(home: home, cwd: cwd, sessionId: id), atomically: true, encoding: .utf8)
+        if let title {
+            try """
+            {"generated_title":"\(title)"}
+            """.write(
+                to: GrokPaths.summaryFile(home: home, cwd: cwd, sessionId: id),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+    }
 }
 
 struct GrokPathsTests {
     @Test func encodesCwdLikeGrok() {
         #expect(
-            GrokPaths.encodeCwd("/Users/teemu/Projects/grok-build-status")
-                == "%2FUsers%2Fteemu%2FProjects%2Fgrok-build-status"
+            GrokPaths.encodeCwd("/Users/alex/Projects/my app")
+                == "%2FUsers%2Falex%2FProjects%2Fmy%20app"
         )
     }
 }
@@ -120,7 +205,7 @@ struct StatusEvaluatorTests {
     @Test func usesLiveSessionEvents() throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("grok-status-test-\(UUID().uuidString)")
-        let cwd = "/Users/teemu/Projects/demo"
+        let cwd = "/Users/alex/Projects/demo"
         let sessionId = "session-1"
         let eventsDir = GrokPaths.eventsFile(home: home, cwd: cwd, sessionId: sessionId)
             .deletingLastPathComponent()
@@ -223,7 +308,7 @@ struct WeeklyUsageTests {
 }
 
 struct GrokMarkTests {
-    @Test func officialGlyphFillsTheViewBox() {
+    @Test func glyphFillsTheViewBox() {
         let box = GrokMark.cgPath().boundingBoxOfPath
         #expect(box.minX > 40)
         #expect(box.minY > 40)

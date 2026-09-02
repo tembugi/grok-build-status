@@ -10,11 +10,6 @@ enum GrokStatusApp {
             return
         }
 
-        if CommandLine.arguments.contains("--uninstall") {
-            try? LoginItem.setEnabled(false)
-            return
-        }
-
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -34,12 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installLifetime.start()
         let statusItem = StatusItemController()
-        statusItem.setLight(StatusEvaluator().evaluate(home: GrokPaths.home()))
         self.statusItem = statusItem
 
-        let monitor = GrokMonitor { light in
+        let monitor = GrokMonitor { light, sessions in
             DispatchQueue.main.async {
-                statusItem.setLight(light)
+                statusItem.setLight(light, sessions: sessions)
             }
         }
         self.monitor = monitor

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Renders the official Grok mark into a macOS iconset, then `iconutil` packs it.
+/// Renders the Grok icon into a macOS iconset; `iconutil` packs it.
 @main
 enum RenderAppIcon {
     static func main() {
