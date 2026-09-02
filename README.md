@@ -1,14 +1,13 @@
 # Grok Status
 
-See **Grok Build** from the Mac menu bar, without watching the terminal.
+See **Grok Build**'s status from the Mac menu bar.
 
-- Tell at a glance if a session is idle, running, waiting for you, or done
-- Notice when Grok needs a permission or an answer — the icon bounces
+- Animated to tell at a glance if a session is idle, running, waiting for you, or done
 - Get a Mac notification when Grok is waiting or done
 - Jump to a live session from the menu
 - Check weekly usage
 
-Unofficial. Not affiliated with SpaceXAI. You already need Grok Build.
+Unofficial. Not affiliated with SpaceXAI.
 
 ## How to use
 
