@@ -1,6 +1,8 @@
 # Grok Status
 
-Unofficial macOS menu extra for Grok Build. It sits in the menu bar and shows whether a session is idle, running, waiting for you, or done.
+Unofficial macOS menu extra for **Grok Build**. It sits in the menu bar and shows whether a session is idle, running, waiting for you, or done.
+
+You already need Grok Build. This app only reads `~/.grok`. It does not start sessions or talk to Grok.
 
 Not affiliated with SpaceXAI.
 
@@ -12,7 +14,7 @@ Mac with Apple Silicon, macOS 14 or later.
 
 The first launch may be blocked as an unidentified developer. Right-click the app, choose Open, then Open again.
 
-**From source** (after you change the code):
+**From source** (after you change the code). Needs the Swift toolchain (Xcode or Command Line Tools):
 
 1. `./package.sh`
 2. Open `dist/Grok Status.dmg`
@@ -24,12 +26,13 @@ To remove it, drag the app to the Trash. Start on login is cleared automatically
 
 ## Menu
 
-- Live sessions — each row shows idle / running / waiting / done; click to focus that terminal (Terminal and iTerm). With more than one session, a line like `2 running · 1 waiting` sits above the list.
-- Weekly usage, when Grok has fetched billing
+- Header such as `1 running` or `2 running · 1 waiting` (`None` if Grok Build is not running)
+- One row per live session — idle / running / waiting / done. Click to focus that terminal (Terminal and iTerm)
+- Weekly usage, after Grok Build has fetched billing
 - **Start on login**
 - Quit
 
-The icon animates while a turn is running.
+The icon orbits while a turn is running, bounces when Grok is waiting for a permission or a question, and pulses when a turn is done.
 
 ## How it works
 
