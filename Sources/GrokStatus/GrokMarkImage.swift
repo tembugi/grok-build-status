@@ -1,6 +1,7 @@
 import AppKit
 import GrokStatusCore
 
+@MainActor
 enum GrokMarkImage {
     static let pointSize = NSSize(width: 24, height: 22)
 
@@ -168,8 +169,13 @@ enum GrokMarkImage {
         }
     }
 
-    private static func arcLengthSamples(in rect: NSRect, time: TimeInterval) -> [OrbitSample] {
-        let tableSteps = 192
+    private static var tableCache: (w: CGFloat, h: CGFloat, table: [(dist: CGFloat, theta: Double)], total: CGFloat)?
+
+    private static func arcLengthTable(in rect: NSRect) -> (table: [(dist: CGFloat, theta: Double)], total: CGFloat) {
+        if let tableCache, tableCache.w == rect.width, tableCache.h == rect.height {
+            return (tableCache.table, tableCache.total)
+        }
+        let tableSteps = 96
         var table: [(dist: CGFloat, theta: Double)] = []
         table.reserveCapacity(tableSteps + 1)
         var dist: CGFloat = 0
@@ -184,11 +190,17 @@ enum GrokMarkImage {
             prev = state.point
         }
         let total = max(table.last?.dist ?? 1, 1)
+        tableCache = (rect.width, rect.height, table, total)
+        return (table, total)
+    }
+
+    private static func arcLengthSamples(in rect: NSRect, time: TimeInterval) -> [OrbitSample] {
+        let (table, total) = arcLengthTable(in: rect)
         let headDist = CGFloat(time) * 30
         var head = headDist.truncatingRemainder(dividingBy: total)
         if head < 0 { head += total }
         let tailLen = total * 0.3
-        let count = 80
+        let count = 40
         var samples: [OrbitSample] = []
         samples.reserveCapacity(count)
         for i in 0..<count {

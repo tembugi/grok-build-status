@@ -23,7 +23,7 @@ enum GrokStatusApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
-    private var monitor: GrokMonitor?
+    private var store: SessionStore?
     private let installLifetime = InstallLifetime()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,12 +31,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statusItem = StatusItemController()
         self.statusItem = statusItem
 
-        let monitor = GrokMonitor { light, sessions in
-            DispatchQueue.main.async {
-                statusItem.setLight(light, sessions: sessions)
+        let store = SessionStore { snapshot in
+            // Common modes so the menu can update while it is open
+            // (default-mode GCD waits until the menu closes).
+            RunLoop.main.perform(inModes: [.common]) {
+                MainActor.assumeIsolated {
+                    statusItem.apply(snapshot)
+                }
             }
         }
-        self.monitor = monitor
-        monitor.start()
+        self.store = store
+        store.start()
     }
 }

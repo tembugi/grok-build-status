@@ -26,6 +26,40 @@ public struct LiveSession: Equatable, Sendable {
     }
 }
 
+public enum AttentionFocus {
+    /// Pulse/bounce may rest only after every session in the combined state
+    /// has been selected as a tab. Window focus does not count.
+    public static func isSettled(
+        light: TrafficLight,
+        sessions: [LiveSession],
+        seenIDs: Set<String>
+    ) -> Bool {
+        switch light {
+        case .waitingForInput, .completed:
+            break
+        default:
+            return false
+        }
+        let needy = sessions.filter { $0.light == light }
+        guard !needy.isEmpty else { return false }
+        return needy.allSatisfy { seenIDs.contains($0.session.sessionId) }
+    }
+}
+
+public struct SessionSnapshot: Equatable, Sendable {
+    public var light: TrafficLight
+    public var sessions: [LiveSession]
+    public var usage: WeeklyUsage?
+
+    public static let empty = SessionSnapshot(light: .inactive, sessions: [], usage: nil)
+
+    public init(light: TrafficLight, sessions: [LiveSession], usage: WeeklyUsage? = nil) {
+        self.light = light
+        self.sessions = sessions
+        self.usage = usage
+    }
+}
+
 public enum SessionRoster {
     public static func snapshots(
         of sessions: [ActiveSession],

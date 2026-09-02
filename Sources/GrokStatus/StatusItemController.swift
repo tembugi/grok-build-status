@@ -2,27 +2,45 @@ import AppKit
 import GrokStatusCore
 import QuartzCore
 
+private enum MenuLayout {
+    static let width: CGFloat = 252
+    static let inset: CGFloat = 14
+    static let gap: CGFloat = 12
+    static let rowHeight: CGFloat = 32
+    static let headingHeight: CGFloat = 24
+
+    static var rowFont: NSFont { NSFont.menuFont(ofSize: 0) }
+    static var headingFont: NSFont { NSFont.menuFont(ofSize: NSFont.smallSystemFontSize) }
+
+    static func textWidth(_ string: String, font: NSFont?) -> CGFloat {
+        guard !string.isEmpty else { return 0 }
+        let font = font ?? NSFont.menuFont(ofSize: 0)
+        let rect = (string as NSString).boundingRect(
+            with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: 32),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        return ceil(rect.width) + 2
+    }
+}
+
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private enum MenuLayout {
-        static let width: CGFloat = 252
-    }
 
     private let item: NSStatusItem
-    private var light: TrafficLight = .inactive
+    private var snapshot = SessionSnapshot.empty
     private var motion = IconMotion()
     private var appearanceObserver: NSKeyValueObservation?
-    private var displayLink: CADisplayLink?
-    private var fallbackTimer: Timer?
+    private var animationTimer: Timer?
     private var loginSwitch: AppleSwitch?
+    private var sessionsHeaderItem: NSMenuItem?
     private var usageItem: NSMenuItem?
-    private var usageTitleField: NSTextField?
-    private var usagePercentField: NSTextField?
-    private var usageResetField: NSTextField?
     private var usageRow: NSView?
-    private var roster: [LiveSession] = []
-    private var sessionStates: [SessionState] = []
-    private var pendingSession: ActiveSession?
+    private var countdownTimer: Timer?
+    private var seenIDs: Set<String> = []
+    private var lightsByID: [String: TrafficLight] = [:]
+    private var iconVisible = true
+    private var menuIsOpen = false
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
@@ -31,6 +49,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
+        let sessions = makeSessionsHeaderItem()
+        sessionsHeaderItem = sessions
+        menu.addItem(sessions)
+        menu.addItem(.separator())
         let usage = makeUsageMenuItem()
         usageItem = usage
         menu.addItem(usage)
@@ -63,95 +85,105 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(occlusionChanged),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(occlusionChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
 
         render()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        roster = SessionRoster.labeled(sessionStates, home: GrokPaths.home())
+        menuIsOpen = true
         rebuildSessionItems(in: menu)
-        syncUsage()
+        bindSnapshotToMenu()
         syncLoginSwitch()
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        guard let session = pendingSession else { return }
-        pendingSession = nil
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(300))
-            if !(await SessionFocus.bringSessionToFront(session)) {
+        menuIsOpen = false
+        stopCountdownClock()
+    }
+
+    private func rebuildSessionItems(in menu: NSMenu) {
+        guard let header = sessionsHeaderItem, let usageItem else { return }
+        for item in menu.items {
+            if item === header { continue }
+            if item === usageItem { break }
+            menu.removeItem(item)
+        }
+        guard let insertAt = menu.items.firstIndex(of: usageItem) else { return }
+
+        var items: [NSMenuItem] = []
+        for row in snapshot.sessions {
+            items.append(makeSessionMenuItem(row))
+        }
+        items.append(.separator())
+        for (offset, item) in items.enumerated() {
+            menu.insertItem(item, at: insertAt + offset)
+        }
+    }
+
+    private func makeSessionsHeaderItem() -> NSMenuItem {
+        let row = KeyedMenuRow(compact: true)
+        row.setTitle("Sessions", value: "None")
+        let item = NSMenuItem()
+        item.view = row
+        return item
+    }
+
+    private func makeSessionMenuItem(_ row: LiveSession) -> NSMenuItem {
+        let view = KeyedMenuRow()
+        view.setTitle(row.title, value: row.light.menuLabel)
+        let item = NSMenuItem(
+            title: "\(row.title), \(row.light.menuLabel)",
+            action: #selector(showSession(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.isEnabled = true
+        item.representedObject = row.session.sessionId
+        item.toolTip = row.light.tooltip
+        view.clickHandler = { [weak self, weak item] in
+            guard let self, let item else { return }
+            item.menu?.cancelTracking()
+            self.showSession(item)
+        }
+        item.view = view
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
+        view.setAccessibilityLabel(item.title)
+        return item
+    }
+
+    private func sessionsCountLabel(_ count: Int) -> String {
+        count == 0 ? "None" : "\(count) active"
+    }
+
+    @objc private func showSession(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let session = snapshot.sessions.first(where: { $0.session.sessionId == id })?.session
+        else { return }
+        // Menu tracking uses a special run-loop mode. AppleScript to Terminal
+        // is ignored until that mode ends. GCD's main queue runs in default
+        // mode after the menu closes — that is the event, not a timer.
+        DispatchQueue.main.async {
+            if !SessionFocus.bringSessionToFront(session) {
                 NSSound.beep()
             }
         }
     }
 
-    private func rebuildSessionItems(in menu: NSMenu) {
-        guard let usageItem else { return }
-        while let first = menu.items.first, first !== usageItem {
-            menu.removeItem(first)
-        }
-
-        var items: [NSMenuItem] = []
-        if roster.isEmpty {
-            items.append(disabledSessionItem("No sessions"))
-        } else {
-            if roster.count > 1, let summary = TrafficLight.countSummary(roster.map(\.light)) {
-                items.append(disabledSessionItem(summary))
-            }
-            for row in roster {
-                let item = NSMenuItem(
-                    title: row.menuTitle,
-                    action: #selector(showSession(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.isEnabled = true
-                item.representedObject = row.session.sessionId
-                item.toolTip = row.light.tooltip
-                items.append(item)
-            }
-        }
-        items.append(.separator())
-
-        for (offset, item) in items.enumerated() {
-            menu.insertItem(item, at: offset)
-        }
-    }
-
-    private func disabledSessionItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    @objc private func showSession(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        pendingSession = roster.first { $0.session.sessionId == id }?.session
-            ?? sessionStates.first { $0.session.sessionId == id }?.session
-    }
-
     private func makeUsageMenuItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 44))
-        let title = NSTextField(labelWithString: "Weekly usage")
-        title.font = NSFont.menuFont(ofSize: 0)
-        title.frame = NSRect(x: 14, y: 22, width: 150, height: 18)
-        let value = NSTextField(labelWithString: "—")
-        value.font = NSFont.monospacedDigitSystemFont(
-            ofSize: NSFont.systemFontSize,
-            weight: .regular
-        )
-        value.alignment = .right
-        value.frame = NSRect(x: 164, y: 22, width: 74, height: 18)
-        let reset = NSTextField(labelWithString: "")
-        reset.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        reset.textColor = .secondaryLabelColor
-        reset.frame = NSRect(x: 14, y: 6, width: 224, height: 16)
-        row.addSubview(title)
-        row.addSubview(value)
-        row.addSubview(reset)
-        usageTitleField = title
-        usagePercentField = value
-        usageResetField = reset
+        let row = UsageMenuRow()
         usageRow = row
 
         let item = NSMenuItem()
@@ -160,31 +192,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func syncUsage() {
-        guard let usage = WeeklyUsage.latest(in: GrokPaths.unifiedLog(home: GrokPaths.home())) else {
-            usageTitleField?.stringValue = "Weekly usage"
-            usagePercentField?.stringValue = "—"
-            usageResetField?.stringValue = ""
-            usageRow?.toolTip = "Usage appears after Grok fetches billing."
+        guard let row = usageRow as? UsageMenuRow else { return }
+        guard let usage = snapshot.usage else {
+            row.set(
+                title: "Weekly usage",
+                percent: "—",
+                reset: "",
+                countdown: ""
+            )
+            row.toolTip = "Usage appears after Grok fetches billing."
             return
         }
-        usageTitleField?.stringValue = usage.title
-        usagePercentField?.stringValue = usage.percentLabel
-        usageResetField?.stringValue = usage.resetLabel() ?? ""
-        usageRow?.toolTip = usage.tooltip
+        row.set(
+            title: usage.title,
+            percent: usage.percentLabel,
+            reset: usage.resetLabel() ?? "",
+            countdown: usage.countdownLabel() ?? ""
+        )
+        row.toolTip = usage.tooltip
     }
 
     private func makeLoginMenuItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 32))
-        let label = NSTextField(labelWithString: "Start on login")
-        label.font = NSFont.menuFont(ofSize: 0)
-        label.frame = NSRect(x: 14, y: 6, width: 168, height: 20)
-        let toggle = AppleSwitch(frame: NSRect(x: 198, y: 4, width: 40, height: 24))
-        toggle.target = self
-        toggle.action = #selector(toggleLogin(_:))
-        toggle.setAccessibilityLabel("Start on login")
-        row.addSubview(label)
-        row.addSubview(toggle)
-        loginSwitch = toggle
+        let row = LoginMenuRow()
+        row.toggle.target = self
+        row.toggle.action = #selector(toggleLogin(_:))
+        row.toggle.setAccessibilityLabel("Start on login")
+        loginSwitch = row.toggle
 
         let item = NSMenuItem()
         item.view = row
@@ -210,60 +243,185 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func focusMayHaveChanged(_ notification: Notification) {
-        if needsDisplayLink {
+        syncIconVisibility()
+        if needsAnimation {
             startAnimating()
         }
         render()
     }
 
-    func setLight(_ light: TrafficLight, sessions: [SessionState] = []) {
-        self.light = light
-        self.sessionStates = sessions
-        if needsDisplayLink {
+    @objc private func occlusionChanged(_ notification: Notification) {
+        if let window = notification.object as? NSWindow,
+           window !== item.button?.window,
+           notification.name == NSWindow.didChangeOcclusionStateNotification
+        {
+            return
+        }
+        syncIconVisibility()
+    }
+
+    private func syncIconVisibility() {
+        let visible = item.button?.window?.occlusionState.contains(.visible) ?? true
+        iconVisible = visible
+        if visible {
+            if needsAnimation {
+                startAnimating()
+            }
+        } else {
+            stopAnimating()
+        }
+    }
+
+    func apply(_ snapshot: SessionSnapshot) {
+        let finishedWhileRunning = reconcileSeen(with: snapshot)
+        self.snapshot = snapshot
+        noteSelectedTab()
+        if finishedWhileRunning, iconVisible {
+            motion.tapPulse()
+        }
+        if needsAnimation {
             startAnimating()
         }
         render()
+        if menuIsOpen {
+            bindSnapshotToMenu()
+        }
     }
 
-    private var needsDisplayLink: Bool {
-        motion.needsFrames(light: light, focused: SessionFocus.isGrokSessionFocused())
+    /// Paints the current snapshot onto whatever rows already exist.
+    /// New fields: put them on `SessionSnapshot`, bind them here.
+    private func bindSnapshotToMenu() {
+        guard let menu = item.menu else { return }
+        if let header = sessionsHeaderItem?.view as? KeyedMenuRow {
+            header.setTitle("Sessions", value: sessionsCountLabel(snapshot.sessions.count))
+        }
+        for item in menu.items {
+            guard let id = item.representedObject as? String,
+                  let row = snapshot.sessions.first(where: { $0.session.sessionId == id })
+            else { continue }
+            item.title = "\(row.title), \(row.light.menuLabel)"
+            item.toolTip = row.light.tooltip
+            if let view = item.view as? KeyedMenuRow {
+                view.setTitle(row.title, value: row.light.menuLabel)
+                view.setAccessibilityLabel(item.title)
+            }
+        }
+        syncUsage()
+        startCountdownClock()
+    }
+
+    private func startCountdownClock() {
+        guard menuIsOpen, let end = snapshot.usage?.periodEnd, end.timeIntervalSinceNow > 0 else {
+            stopCountdownClock()
+            return
+        }
+        guard countdownTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, target: self, selector: #selector(tickCountdown), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        countdownTimer = timer
+    }
+
+    private func stopCountdownClock() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+    }
+
+    @objc private func tickCountdown() {
+        guard menuIsOpen else {
+            stopCountdownClock()
+            return
+        }
+        syncUsage()
+        if snapshot.usage?.periodEnd?.timeIntervalSinceNow ?? 0 <= 0 {
+            stopCountdownClock()
+        }
+    }
+
+    private func reconcileSeen(with snapshot: SessionSnapshot) -> Bool {
+        let ids = Set(snapshot.sessions.map(\.session.sessionId))
+        seenIDs = seenIDs.intersection(ids)
+        var finished = false
+        for row in snapshot.sessions {
+            let id = row.session.sessionId
+            let previous = lightsByID[id]
+            if row.light == .completed, let previous, previous != .completed {
+                finished = true
+            }
+            if previous != row.light {
+                seenIDs.remove(id)
+            }
+            lightsByID[id] = row.light
+        }
+        lightsByID = lightsByID.filter { ids.contains($0.key) }
+        return finished && snapshot.light == .running
+    }
+
+    /// Only a matching tab TTY counts. Frontmost Terminal does not.
+    private func noteSelectedTab() {
+        guard let tty = SessionFocus.selectedTabTTY() else { return }
+        for row in snapshot.sessions {
+            if ProcessLiveness.ttyName(of: row.session.pid) == tty {
+                seenIDs.insert(row.session.sessionId)
+                return
+            }
+        }
+    }
+
+    private var attentionFocused: Bool {
+        AttentionFocus.isSettled(
+            light: snapshot.light,
+            sessions: snapshot.sessions,
+            seenIDs: seenIDs
+        )
+    }
+
+    private var needsAnimation: Bool {
+        iconVisible && motion.needsFrames(light: snapshot.light)
     }
 
     private func startAnimating() {
-        guard displayLink == nil, fallbackTimer == nil else { return }
-        if let screen = item.button?.window?.screen ?? NSScreen.main {
-            let link = screen.displayLink(target: self, selector: #selector(tick))
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        } else {
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                DispatchQueue.main.async { self?.render() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            fallbackTimer = timer
-        }
+        guard animationTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30.0, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        animationTimer = timer
     }
 
     private func stopAnimating() {
-        displayLink?.invalidate()
-        displayLink = nil
-        fallbackTimer?.invalidate()
-        fallbackTimer = nil
+        animationTimer?.invalidate()
+        animationTimer = nil
     }
 
-    @objc private func tick(_ link: CADisplayLink) {
+    @objc private func tick() {
+        pollSelectedTabIfNeeded()
         render()
-        if !needsDisplayLink {
+        if !needsAnimation {
             stopAnimating()
         }
+    }
+
+    private var lastTabPoll: TimeInterval = 0
+
+    private func pollSelectedTabIfNeeded() {
+        switch snapshot.light {
+        case .waitingForInput, .completed:
+            break
+        default:
+            return
+        }
+        let now = CACurrentMediaTime()
+        guard now - lastTabPoll >= 0.25 else { return }
+        lastTabPoll = now
+        noteSelectedTab()
     }
 
     private func render() {
         guard let button = item.button else { return }
         motion.advance(
-            light: light,
+            light: snapshot.light,
             now: CACurrentMediaTime(),
-            focused: SessionFocus.isGrokSessionFocused()
+            focused: attentionFocused
         )
         let appearance = button.effectiveAppearance
         let scale = button.window?.backingScaleFactor
@@ -280,9 +438,252 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func iconTooltip() -> String {
-        if sessionStates.count > 1, let summary = TrafficLight.countSummary(sessionStates.map(\.light)) {
+        if snapshot.sessions.count > 1, let summary = TrafficLight.countSummary(snapshot.sessions.map(\.light)) {
             return summary
         }
-        return (sessionStates.first?.light ?? light).tooltip
+        return (snapshot.sessions.first?.light ?? snapshot.light).tooltip
+    }
+}
+
+@MainActor
+private func menuLabel(
+    font: NSFont,
+    color: NSColor = .labelColor,
+    alignment: NSTextAlignment = .left,
+    truncates: Bool = false
+) -> NSTextField {
+    let field = NSTextField(labelWithString: "")
+    field.font = font
+    field.textColor = color
+    field.alignment = alignment
+    field.lineBreakMode = truncates ? .byTruncatingTail : .byClipping
+    field.usesSingleLineMode = true
+    field.maximumNumberOfLines = 1
+    if let cell = field.cell as? NSTextFieldCell {
+        cell.wraps = false
+        cell.isScrollable = false
+        cell.truncatesLastVisibleLine = truncates
+        cell.lineBreakMode = truncates ? .byTruncatingTail : .byClipping
+        cell.alignment = alignment
+    }
+    field.setContentCompressionResistancePriority(
+        truncates ? .fittingSizeCompression : .required,
+        for: .horizontal
+    )
+    field.setContentHuggingPriority(
+        truncates ? .defaultLow : .required,
+        for: .horizontal
+    )
+    return field
+}
+
+/// Custom menu views keep a fixed width so long titles cannot stretch the menu.
+private class MenuItemRowView: NSView {
+    let rowHeight: CGFloat
+
+    init(height: CGFloat) {
+        rowHeight = height
+        super.init(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: height))
+        autoresizingMask = [.width]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: MenuLayout.width, height: rowHeight)
+    }
+
+    override var fittingSize: NSSize { intrinsicContentSize }
+
+    fileprivate func trailingValueFrame(for field: NSTextField, y: CGFloat, height: CGFloat) -> (value: NSRect, title: NSRect) {
+        let inset = MenuLayout.inset
+        let gap = MenuLayout.gap
+        let valueWidth = MenuLayout.textWidth(field.stringValue, font: field.font)
+        let value = NSRect(
+            x: bounds.width - inset - valueWidth,
+            y: y,
+            width: valueWidth,
+            height: height
+        )
+        let titleRight = valueWidth > 0 ? value.minX - gap : bounds.width - inset
+        let title = NSRect(x: inset, y: y, width: max(0, titleRight - inset), height: height)
+        return (value, title)
+    }
+}
+
+/// One menu row: title on the left, grey value on the right.
+private final class KeyedMenuRow: MenuItemRowView {
+    let titleField: NSTextField
+    let valueField: NSTextField
+    var clickHandler: (() -> Void)?
+    private let compact: Bool
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+
+    init(compact: Bool = false) {
+        self.compact = compact
+        let font = compact ? MenuLayout.headingFont : MenuLayout.rowFont
+        titleField = menuLabel(
+            font: font,
+            color: compact ? .secondaryLabelColor : .labelColor,
+            truncates: true
+        )
+        valueField = menuLabel(
+            font: font,
+            color: .secondaryLabelColor,
+            alignment: .right
+        )
+        super.init(height: compact ? MenuLayout.headingHeight : MenuLayout.rowHeight)
+        addSubview(titleField)
+        addSubview(valueField)
+    }
+
+    func setTitle(_ title: String, value: String) {
+        titleField.stringValue = title
+        valueField.stringValue = value
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        let labelHeight: CGFloat = compact ? 16 : 20
+        let y = ((bounds.height - labelHeight) / 2).rounded()
+        let frames = trailingValueFrame(for: valueField, y: y, height: labelHeight)
+        valueField.frame = frames.value
+        titleField.preferredMaxLayoutWidth = frames.title.width
+        titleField.frame = frames.title
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        guard clickHandler != nil else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard clickHandler != nil else { return }
+        hovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hovered {
+            NSColor.quaternaryLabelColor.setFill()
+            bounds.fill()
+        }
+        super.draw(dirtyRect)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else { return }
+        clickHandler?()
+    }
+}
+
+private final class UsageMenuRow: MenuItemRowView {
+    let titleField: NSTextField
+    let percentField: NSTextField
+    let resetField: NSTextField
+    let countdownField: NSTextField
+
+    init() {
+        titleField = menuLabel(font: MenuLayout.rowFont, truncates: true)
+        percentField = menuLabel(
+            font: NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.systemFontSize,
+                weight: .regular
+            ),
+            alignment: .right
+        )
+        resetField = menuLabel(
+            font: MenuLayout.headingFont,
+            color: .secondaryLabelColor
+        )
+        countdownField = menuLabel(
+            font: NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.smallSystemFontSize,
+                weight: .regular
+            ),
+            color: .secondaryLabelColor
+        )
+        super.init(height: 60)
+        addSubview(titleField)
+        addSubview(percentField)
+        addSubview(resetField)
+        addSubview(countdownField)
+    }
+
+    func set(title: String, percent: String, reset: String, countdown: String) {
+        titleField.stringValue = title
+        percentField.stringValue = percent
+        resetField.stringValue = reset
+        countdownField.stringValue = countdown
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        let inset = MenuLayout.inset
+        let inner = max(0, bounds.width - inset * 2)
+        let frames = trailingValueFrame(for: percentField, y: 38, height: 18)
+        percentField.frame = frames.value
+        titleField.preferredMaxLayoutWidth = frames.title.width
+        titleField.frame = frames.title
+        resetField.preferredMaxLayoutWidth = inner
+        countdownField.preferredMaxLayoutWidth = inner
+        resetField.frame = NSRect(x: inset, y: 20, width: inner, height: 16)
+        countdownField.frame = NSRect(x: inset, y: 4, width: inner, height: 14)
+    }
+}
+
+private final class LoginMenuRow: MenuItemRowView {
+    let labelField: NSTextField
+    let toggle: AppleSwitch
+
+    init() {
+        labelField = menuLabel(font: MenuLayout.rowFont)
+        labelField.stringValue = "Start on login"
+        toggle = AppleSwitch(frame: NSRect(x: 0, y: 0, width: 40, height: 24))
+        super.init(height: 32)
+        addSubview(labelField)
+        addSubview(toggle)
+    }
+
+    override func layout() {
+        super.layout()
+        let inset = MenuLayout.inset
+        let gap = MenuLayout.gap
+        let switchSize = toggle.intrinsicContentSize
+        toggle.frame = NSRect(
+            x: bounds.width - inset - switchSize.width,
+            y: ((bounds.height - switchSize.height) / 2).rounded(),
+            width: switchSize.width,
+            height: switchSize.height
+        )
+        let labelWidth = max(0, toggle.frame.minX - gap - inset)
+        labelField.frame = NSRect(x: inset, y: 6, width: labelWidth, height: 20)
     }
 }

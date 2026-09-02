@@ -45,13 +45,29 @@ public struct WeeklyUsage: Equatable, Sendable {
 
     public func resetLabel(locale: Locale = .current, now: Date = Date()) -> String? {
         guard let periodEnd else { return nil }
-        if periodEnd.timeIntervalSince(now) <= 0 { return "Reset due" }
         let formatter = DateFormatter()
         formatter.locale = locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         formatter.doesRelativeDateFormatting = false
         return "Resets \(formatter.string(from: periodEnd))"
+    }
+
+    /// Live remaining time, always days, hours, minutes, seconds.
+    public func countdownLabel(now: Date = Date()) -> String? {
+        guard let periodEnd else { return nil }
+        return Self.countdownPhrase(until: periodEnd, now: now)
+    }
+
+    public static func countdownPhrase(until end: Date, now: Date) -> String {
+        let remaining = end.timeIntervalSince(now)
+        if remaining <= 0 { return "Reset due" }
+        let total = Int(remaining.rounded(.down))
+        let days = total / 86_400
+        let hours = (total % 86_400) / 3_600
+        let minutes = (total % 3_600) / 60
+        let seconds = total % 60
+        return String(format: "%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
     }
 
     public var tooltip: String {

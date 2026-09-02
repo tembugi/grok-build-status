@@ -170,6 +170,13 @@ struct ProcessLivenessTests {
         #expect(ProcessLiveness.ttyName(of: -1) == nil)
     }
 
+    @Test func normalizedTTY() {
+        #expect(ProcessLiveness.normalizedTTY("/dev/ttys000") == "ttys000")
+        #expect(ProcessLiveness.normalizedTTY("ttys012") == "ttys012")
+        #expect(ProcessLiveness.normalizedTTY("") == nil)
+        #expect(ProcessLiveness.normalizedTTY("not a tty") == nil)
+    }
+
     @Test func parentOfInitIsNil() {
         #expect(ProcessLiveness.parent(of: 1) == nil || ProcessLiveness.parent(of: 1) == 0)
     }
@@ -303,7 +310,67 @@ struct WeeklyUsageTests {
         #expect(label?.hasPrefix("Resets ") == true)
         #expect(label?.contains(":") == true)
         usage.periodEnd = now.addingTimeInterval(-60)
-        #expect(usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now) == "Reset due")
+        let past = usage.resetLabel(locale: Locale(identifier: "en_GB"), now: now)
+        #expect(past?.hasPrefix("Resets ") == true)
+        #expect(past?.contains(":") == true)
+    }
+
+    @Test func countdownIncludesDaysHoursMinutesSeconds() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let end = now.addingTimeInterval(2 * 86_400 + 3 * 3_600 + 4 * 60 + 5)
+        #expect(WeeklyUsage.countdownPhrase(until: end, now: now) == "2d 03h 04m 05s")
+        let sameDay = now.addingTimeInterval(3 * 3_600 + 4 * 60 + 5)
+        #expect(WeeklyUsage.countdownPhrase(until: sameDay, now: now) == "0d 03h 04m 05s")
+        var usage = WeeklyUsage(usedPercent: 1, periodEnd: end)
+        #expect(usage.countdownLabel(now: now) == "2d 03h 04m 05s")
+        usage.periodEnd = now.addingTimeInterval(-1)
+        #expect(usage.countdownLabel(now: now) == "Reset due")
+        usage.periodEnd = nil
+        #expect(usage.countdownLabel(now: now) == nil)
+    }
+}
+
+struct AttentionFocusTests {
+    private func row(_ id: String, _ light: TrafficLight) -> LiveSession {
+        LiveSession(
+            session: ActiveSession(sessionId: id, pid: 1, cwd: "/tmp/\(id)"),
+            light: light,
+            title: id
+        )
+    }
+
+    @Test func sittingOnIdleTabDoesNotSettleWaiting() {
+        let sessions = [row("a", .idle), row("b", .waitingForInput)]
+        #expect(
+            AttentionFocus.isSettled(light: .waitingForInput, sessions: sessions, seenIDs: ["a"])
+                == false
+        )
+    }
+
+    @Test func waitingSettlesOnlyAfterThatTab() {
+        let sessions = [row("a", .idle), row("b", .waitingForInput)]
+        #expect(
+            AttentionFocus.isSettled(light: .waitingForInput, sessions: sessions, seenIDs: ["b"])
+        )
+    }
+
+    @Test func twoCompletedNeedBothTabs() {
+        let sessions = [row("a", .completed), row("b", .completed)]
+        #expect(
+            AttentionFocus.isSettled(light: .completed, sessions: sessions, seenIDs: ["a"])
+                == false
+        )
+        #expect(
+            AttentionFocus.isSettled(light: .completed, sessions: sessions, seenIDs: ["a", "b"])
+        )
+    }
+
+    @Test func runningNeverSettlesAttention() {
+        let sessions = [row("a", .running)]
+        #expect(
+            AttentionFocus.isSettled(light: .running, sessions: sessions, seenIDs: ["a"])
+                == false
+        )
     }
 }
 

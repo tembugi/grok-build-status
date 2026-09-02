@@ -9,16 +9,23 @@ public final class EventFileReader: @unchecked Sendable {
 
     public func readNew(from url: URL) {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
-        defer { try? handle.close() }
-
-        guard let size = try? handle.seekToEnd() else { return }
+        let size: UInt64
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let value = attrs[.size] as? NSNumber
+        {
+            size = value.uint64Value
+        } else {
+            return
+        }
+        if size == offset { return }
         if size < offset {
             offset = 0
             pending = Data()
             state = SessionRuntimeState()
         }
 
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
         do {
             try handle.seek(toOffset: offset)
             let data = try handle.readToEnd() ?? Data()
