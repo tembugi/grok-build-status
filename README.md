@@ -45,4 +45,4 @@ Reads `~/.grok` (or `GROK_HOME`):
 
 ## License
 
-[CC0](LICENSE), except the official Grok icon, which belongs to SpaceXAI.
+[CC0](LICENSE) for this project's original source. Grok names and the official Grok icon belong to SpaceXAI.
