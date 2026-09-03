@@ -1,5 +1,5 @@
 import AppKit
-import GrokStatusCore
+import GrokBuildStatusCore
 import QuartzCore
 
 private enum MenuLayout {
@@ -26,6 +26,11 @@ private enum MenuLayout {
 
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
+
+    private static var displayName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? "Grok Build Status"
+    }
 
     private let item: NSStatusItem
     private var snapshot = SessionSnapshot.empty
@@ -63,7 +68,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(makeLoginMenuItem())
         menu.addItem(.separator())
         let quit = NSMenuItem(
-            title: "Quit Grok Status",
+            title: "Quit \(Self.displayName)",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -284,10 +289,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         loginSwitch?.setOn(LoginItem.isEnabled, animated: false)
         loginSwitch?.toolTip = installed
             ? nil
-            : "Install Grok Status to the Applications folder to enable this."
+            : "Install \(Self.displayName) to the Applications folder to enable this."
     }
 
     @objc private func focusMayHaveChanged(_ notification: Notification) {
+        noteSelectedTab()
         syncIconVisibility()
         if needsAnimation {
             startAnimating()
@@ -420,6 +426,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Only a matching tab TTY counts. Frontmost Terminal does not.
     private func noteSelectedTab() {
+        switch snapshot.light {
+        case .waitingForInput, .completed:
+            break
+        default:
+            return
+        }
         guard let tty = SessionFocus.selectedTabTTY() else { return }
         for row in snapshot.sessions {
             if ProcessLiveness.ttyName(of: row.session.pid) == tty {
@@ -438,7 +450,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private var needsAnimation: Bool {
-        iconVisible && motion.needsFrames(light: snapshot.light)
+        iconVisible && motion.needsFrames(light: snapshot.light, focused: attentionFocused)
     }
 
     private func startAnimating() {
@@ -472,7 +484,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return
         }
         let now = CACurrentMediaTime()
-        guard now - lastTabPoll >= 0.25 else { return }
+        guard now - lastTabPoll >= 0.5 else { return }
         lastTabPoll = now
         noteSelectedTab()
     }

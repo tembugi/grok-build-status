@@ -183,6 +183,77 @@ public struct WeeklyUsage: Equatable, Sendable {
     }
 }
 
+/// Tails `unified.jsonl` so a growing log is not re-scanned from scratch.
+public final class WeeklyUsageReader: @unchecked Sendable {
+    private var offset: UInt64 = 0
+    private var pending = Data()
+    private var primed = false
+    public private(set) var latest: WeeklyUsage?
+
+    public init() {}
+
+    public func readNew(from url: URL, maxBytes: Int = 1_048_576) -> WeeklyUsage? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            reset()
+            return nil
+        }
+        let size: UInt64
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let value = attrs[.size] as? NSNumber
+        {
+            size = value.uint64Value
+        } else {
+            return latest
+        }
+        if size < offset {
+            reset()
+        }
+        if !primed {
+            latest = WeeklyUsage.latest(in: url, maxBytes: maxBytes)
+            offset = size
+            pending = Data()
+            primed = true
+            return latest
+        }
+        if size == offset { return latest }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return latest }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: offset)
+            let data = try handle.readToEnd() ?? Data()
+            offset += UInt64(data.count)
+            ingest(data)
+        } catch {
+            return latest
+        }
+        return latest
+    }
+
+    private func reset() {
+        offset = 0
+        pending = Data()
+        primed = false
+        latest = nil
+    }
+
+    private func ingest(_ data: Data) {
+        pending.append(data)
+        if pending.count > 1_048_576 {
+            pending.removeAll(keepingCapacity: false)
+            return
+        }
+        while let newline = pending.firstRange(of: Data([0x0A])) {
+            let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
+            pending.removeSubrange(..<newline.upperBound)
+            if let text = String(data: line, encoding: .utf8),
+               let parsed = WeeklyUsage.parse(line: text)
+            {
+                latest = parsed
+            }
+        }
+    }
+}
+
 private extension WeeklyUsage.Period {
     init(rawType: String?) {
         switch rawType {

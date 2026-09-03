@@ -1,5 +1,5 @@
 import Foundation
-import GrokStatusCore
+import GrokBuildStatusCore
 
 struct IconPose: Equatable {
     var comet: CGFloat
@@ -45,14 +45,16 @@ struct IconMotion {
             || abs(pulseAlpha - 1) > 0.02
     }
 
-    /// Clock runs for running / waiting / done. Focus never stops the comet;
-    /// bounce and pulse still settle in `advance` when that tab is selected.
-    func needsFrames(light: TrafficLight) -> Bool {
+    /// Running always needs frames (comet). Waiting / done keep the clock only
+    /// while that tab is not selected, plus any bounce/pulse still settling.
+    func needsFrames(light: TrafficLight, focused: Bool) -> Bool {
         if isSettling { return true }
         if tapClock != nil { return true }
         switch light {
-        case .running, .waitingForInput, .completed:
+        case .running:
             return true
+        case .waitingForInput, .completed:
+            return !focused
         default:
             return false
         }

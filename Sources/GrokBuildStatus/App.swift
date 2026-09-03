@@ -1,8 +1,8 @@
 import AppKit
-import GrokStatusCore
+import GrokBuildStatusCore
 
 @main
-enum GrokStatusApp {
+enum GrokBuildStatusApp {
     static func main() {
         if CommandLine.arguments.contains("--print") {
             let light = StatusEvaluator().evaluate(home: GrokPaths.home())

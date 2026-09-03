@@ -9,13 +9,15 @@ public enum GrokMark {
         "M183.042 337.641C136.519 291.294 144.54 219.567 184.236 178.203C213.59 147.59 261.683 135.096 303.666 153.464L348.755 131.75C340.632 125.627 330.221 119.042 318.275 114.414C264.277 91.2407 199.63 102.774 155.735 148.516C113.513 192.549 100.236 260.254 123.036 318.027C140.069 361.206 112.148 391.748 84.0229 422.575C74.0561 433.503 64.0553 444.431 56 456L183.007 337.677",
     ]
 
-    public static func cgPath() -> CGPath {
+    public static func cgPath() -> CGPath { cachedPath }
+
+    nonisolated(unsafe) private static let cachedPath: CGPath = {
         let path = CGMutablePath()
         for d in pathData {
             append(d, to: path)
         }
-        return path
-    }
+        return path.copy() ?? path
+    }()
 
     static func append(_ d: String, to path: CGMutablePath) {
         let tokens = tokenize(d)

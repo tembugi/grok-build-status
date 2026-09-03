@@ -1,11 +1,11 @@
 import Foundation
-import GrokStatusCore
+import GrokBuildStatusCore
 
 /// Sole reader of `~/.grok` for the extra. Icon and menu only see snapshots.
 final class SessionStore: @unchecked Sendable {
     private let home: URL
     private let onChange: @Sendable (SessionSnapshot) -> Void
-    private let queue = DispatchQueue(label: "dev.teemu.GrokStatus.store")
+    private let queue = DispatchQueue(label: "dev.teemu.GrokBuildStatus.store")
     private var watcher: FolderWatcher?
     private var poll: DispatchSourceTimer?
     private var debounceWork: DispatchWorkItem?
@@ -13,8 +13,8 @@ final class SessionStore: @unchecked Sendable {
     private var lastSessions: [ActiveSession] = []
     private var lastSnapshot: SessionSnapshot?
     private var lastLights: [String: Int] = [:]
-    private var lastUsageStamp: (mtime: Date?, size: UInt64)?
     private var lastActiveStamp: (mtime: Date?, size: UInt64)?
+    private let usageReader = WeeklyUsageReader()
 
     init(
         home: URL = GrokPaths.home(),
@@ -28,7 +28,13 @@ final class SessionStore: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.publish()
-            let watcher = FolderWatcher(path: self.home.path, queue: self.queue, latency: 0.2) { [weak self] in
+            let watcher = FolderWatcher(
+                path: self.home.path,
+                queue: self.queue,
+                latency: 0.2,
+                fileEvents: true,
+                matching: Self.isWatchedPath
+            ) { [weak self] in
                 self?.schedulePublish()
             }
             watcher.start()
@@ -89,11 +95,9 @@ final class SessionStore: @unchecked Sendable {
             states.append(SessionState(session: session, light: reader.state.light))
         }
 
-        let usageURL = GrokPaths.unifiedLog(home: home)
-        let usageStamp = fileStamp(usageURL)
+        let usage = usageReader.readNew(from: GrokPaths.unifiedLog(home: home))
         let sessionsUnchanged = lights == lastLights
-        let usageUnchanged = usageStamp.mtime == lastUsageStamp?.mtime
-            && usageStamp.size == lastUsageStamp?.size
+        let usageUnchanged = usage == lastSnapshot?.usage
 
         if sessionsUnchanged, usageUnchanged, let lastSnapshot {
             return lastSnapshot
@@ -106,16 +110,16 @@ final class SessionStore: @unchecked Sendable {
             sessions = SessionRoster.labeled(states, home: home)
         }
 
-        let usage: WeeklyUsage?
-        if usageUnchanged, let lastSnapshot {
-            usage = lastSnapshot.usage
-        } else {
-            usage = WeeklyUsage.latest(in: usageURL)
-        }
-
         lastLights = lights
-        lastUsageStamp = usageStamp
         return SessionSnapshot(light: light, sessions: sessions, usage: usage)
+    }
+
+    /// Live session list, event tails, billing log, and titles for duplicate folders.
+    private static func isWatchedPath(_ path: String) -> Bool {
+        path.hasSuffix("active_sessions.json")
+            || path.hasSuffix("events.jsonl")
+            || path.hasSuffix("unified.jsonl")
+            || path.hasSuffix("summary.json")
     }
 
     private func fileStamp(_ url: URL) -> (mtime: Date?, size: UInt64) {

@@ -1,9 +1,10 @@
 import AppKit
-import GrokStatusCore
+import GrokBuildStatusCore
 
 @MainActor
 enum GrokMarkImage {
     static let pointSize = NSSize(width: 24, height: 22)
+    private static var cached: (name: NSAppearance.Name, scale: CGFloat, pose: IconPose, image: NSImage)?
 
     static func make(
         appearance: NSAppearance,
@@ -11,6 +12,13 @@ enum GrokMarkImage {
         pose: IconPose
     ) -> NSImage {
         let scale = max(scale, 1)
+        if let cached,
+           cached.name == appearance.name,
+           cached.scale == scale,
+           cached.pose == pose
+        {
+            return cached.image
+        }
         let pixelsWide = Int((pointSize.width * scale).rounded())
         let pixelsHigh = Int((pointSize.height * scale).rounded())
         guard let rep = NSBitmapImageRep(
@@ -61,6 +69,7 @@ enum GrokMarkImage {
         let image = NSImage(size: pointSize)
         image.addRepresentation(rep)
         image.isTemplate = true
+        cached = (appearance.name, scale, pose, image)
         return image
     }
 

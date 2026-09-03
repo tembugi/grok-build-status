@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 /// Clears the login item if the app is moved to Trash or deleted, even when
@@ -7,12 +8,13 @@ import Foundation
 @MainActor
 final class InstallLifetime {
     private var watcher: FolderWatcher?
-    private var timer: Timer?
+    private var bundleWatch: DispatchSourceFileSystemObject?
     private var removing = false
 
     func start() {
         handleIfUninstalled()
-        let folder = Bundle.main.bundleURL.deletingLastPathComponent().path
+        let bundleURL = Bundle.main.bundleURL
+        let folder = bundleURL.deletingLastPathComponent().path
         let watcher = FolderWatcher(path: folder, queue: .main) { [weak self] in
             Task { @MainActor in
                 self?.handleIfUninstalled()
@@ -20,13 +22,29 @@ final class InstallLifetime {
         }
         watcher.start()
         self.watcher = watcher
+        watchBundle(bundleURL)
+    }
 
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleIfUninstalled()
-            }
+    private func watchBundle(_ url: URL) {
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.delete, .rename, .revoke, .link],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            self?.handleIfUninstalled()
         }
-        timer?.tolerance = 1
+        source.setCancelHandler {
+            close(fd)
+        }
+        source.resume()
+        bundleWatch = source
+    }
+
+    deinit {
+        bundleWatch?.cancel()
     }
 
     private func handleIfUninstalled() {

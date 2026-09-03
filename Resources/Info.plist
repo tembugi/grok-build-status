@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>GrokStatus</string>
+	<string>GrokBuildStatus</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.teemu.GrokStatus</string>
+	<string>dev.teemu.GrokBuildStatus</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>GrokStatus</string>
+	<string>Grok Build Status</string>
 	<key>CFBundleDisplayName</key>
 	<string>Grok Build Status</string>
 	<key>CFBundleIconFile</key>
@@ -28,5 +28,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Grok Build Status talks to Terminal and iTerm so it can jump to a live session and notice when that tab is already selected.</string>
 </dict>
 </plist>

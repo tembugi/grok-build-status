@@ -3,20 +3,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "GrokStatus",
+    name: "GrokBuildStatus",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "GrokStatus", targets: ["GrokStatus"]),
+        .executable(name: "GrokBuildStatus", targets: ["GrokBuildStatus"]),
     ],
     targets: [
-        .target(name: "GrokStatusCore"),
+        .target(name: "GrokBuildStatusCore"),
         .executableTarget(
-            name: "GrokStatus",
-            dependencies: ["GrokStatusCore"]
+            name: "GrokBuildStatus",
+            dependencies: ["GrokBuildStatusCore"]
         ),
         .testTarget(
-            name: "GrokStatusCoreTests",
-            dependencies: ["GrokStatusCore"]
+            name: "GrokBuildStatusCoreTests",
+            dependencies: ["GrokBuildStatusCore"]
         ),
     ]
 )

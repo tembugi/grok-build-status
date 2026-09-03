@@ -1,10 +1,35 @@
 import AppKit
 import ApplicationServices
-import GrokStatusCore
+import GrokBuildStatusCore
 
 @MainActor
 enum SessionFocus {
     private static var tabTTYCache: (pid: pid_t, at: TimeInterval, tty: String?)?
+
+    private static let terminalSelectedTTYScript = NSAppleScript(source: """
+        tell application "Terminal"
+            if (count of windows) is 0 then return ""
+            try
+                repeat with w in windows
+                    if frontmost of w then
+                        return (tty of selected tab of w) as text
+                    end if
+                end repeat
+                return (tty of selected tab of window 1) as text
+            end try
+            return ""
+        end tell
+        """)
+
+    private static let itermSelectedTTYScript = NSAppleScript(source: """
+        tell application "iTerm"
+            if (count of windows) is 0 then return ""
+            try
+                return (tty of current session of current tab of current window) as text
+            end try
+            return ""
+        end tell
+        """)
 
     /// TTY of the selected Terminal/iTerm tab, or nil if unknown.
     /// Never infers this from “Terminal is frontmost.”
@@ -12,40 +37,15 @@ enum SessionFocus {
         guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
         let frontPID = front.processIdentifier
         let now = CFAbsoluteTimeGetCurrent()
-        if let tabTTYCache, tabTTYCache.pid == frontPID, now - tabTTYCache.at < 0.1 {
+        if let tabTTYCache, tabTTYCache.pid == frontPID, now - tabTTYCache.at < 0.4 {
             return tabTTYCache.tty
         }
         let tty: String?
         switch front.bundleIdentifier {
         case "com.apple.Terminal":
-            tty = ProcessLiveness.normalizedTTY(appleScriptText(
-                """
-                tell application "Terminal"
-                    if (count of windows) is 0 then return ""
-                    try
-                        repeat with w in windows
-                            if frontmost of w then
-                                return (tty of selected tab of w) as text
-                            end if
-                        end repeat
-                        return (tty of selected tab of window 1) as text
-                    end try
-                    return ""
-                end tell
-                """
-            ))
+            tty = ProcessLiveness.normalizedTTY(appleScriptText(script: terminalSelectedTTYScript))
         case "com.googlecode.iterm2":
-            tty = ProcessLiveness.normalizedTTY(appleScriptText(
-                """
-                tell application "iTerm"
-                    if (count of windows) is 0 then return ""
-                    try
-                        return (tty of current session of current tab of current window) as text
-                    end try
-                    return ""
-                end tell
-                """
-            ))
+            tty = ProcessLiveness.normalizedTTY(appleScriptText(script: itermSelectedTTYScript))
         default:
             tty = nil
         }
@@ -252,13 +252,19 @@ enum SessionFocus {
         ProcessLiveness.normalizedTTY(name)
     }
 
-    private static func appleScriptText(_ source: String) -> String? {
+    private static func appleScriptText(script: NSAppleScript?) -> String? {
+        guard let script else { return nil }
         var error: NSDictionary?
-        if let script = NSAppleScript(source: source) {
-            let result = script.executeAndReturnError(&error)
-            if error == nil, let text = result.stringValue, !text.isEmpty {
-                return text
-            }
+        let result = script.executeAndReturnError(&error)
+        if error == nil, let text = result.stringValue, !text.isEmpty {
+            return text
+        }
+        return nil
+    }
+
+    private static func appleScriptText(_ source: String) -> String? {
+        if let text = appleScriptText(script: NSAppleScript(source: source)) {
+            return text
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")

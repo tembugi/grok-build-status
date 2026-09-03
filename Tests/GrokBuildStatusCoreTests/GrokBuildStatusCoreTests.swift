@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import GrokStatusCore
+@testable import GrokBuildStatusCore
 
 struct SessionRuntimeStateTests {
     @Test func idleByDefault() {
@@ -251,6 +251,15 @@ struct EventFileReaderTests {
         #expect(reader.state.light == .running)
     }
 
+    @Test func hugePendingLineResets() {
+        let reader = EventFileReader()
+        reader.ingest(Data(#"{"type":"turn_started"}\#n"#.utf8))
+        #expect(reader.state.light == .running)
+        reader.ingest(Data(repeating: 65, count: 300_000))
+        #expect(reader.state.light == .idle)
+        #expect(reader.state.turnOpen == false)
+    }
+
     @Test func holdsIncompleteLastLine() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -391,6 +400,38 @@ struct WeeklyUsageTests {
         let log = FileManager.default.temporaryDirectory
             .appendingPathComponent("missing-unified-\(UUID().uuidString).jsonl")
         #expect(WeeklyUsage.latest(in: log) == nil)
+    }
+
+    @Test func readerTailsNewBillingLines() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("weekly-usage-tail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = dir.appendingPathComponent("unified.jsonl")
+        try """
+        {"ts":"2026-09-01T11:00:00Z","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":12}}}
+
+        """.write(to: log, atomically: true, encoding: .utf8)
+        let reader = WeeklyUsageReader()
+        #expect(reader.readNew(from: log)?.usedPercent == 12)
+
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"ts":"2026-09-01T12:00:00Z","msg":"noise"}\#n"#.utf8))
+        try handle.close()
+        #expect(reader.readNew(from: log)?.usedPercent == 12)
+
+        let handle2 = try FileHandle(forWritingTo: log)
+        try handle2.seekToEnd()
+        try handle2.write(contentsOf: Data(#"{"ts":"2026-09-01T13:00:00Z","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":18.0}}}\#n"#.utf8))
+        try handle2.close()
+        #expect(reader.readNew(from: log)?.usedPercent == 18)
+    }
+
+    @Test func readerMissingLogIsNil() {
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("missing-usage-reader-\(UUID().uuidString).jsonl")
+        #expect(WeeklyUsageReader().readNew(from: log) == nil)
     }
 
     @Test func resetsPhrase() {
