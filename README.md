@@ -23,6 +23,10 @@ Start on login only works after the app is in Applications.
 
 Drag the app to the Trash to remove it. Login is cleared automatically.
 
+## Feedback
+
+[Open an issue](https://github.com/tembugi/grok-build-status/issues).
+
 ## Privacy
 
 Grok Build Status stays on your Mac. It does not open a network connection and does not send telemetry.
