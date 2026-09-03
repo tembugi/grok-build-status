@@ -7,7 +7,7 @@ See **Grok Build**'s status from the Mac menu bar.
 - Jump to a live session from the menu
 - Check weekly usage
 
-Unofficial. Not affiliated with SpaceXAI.
+Unofficial. Not affiliated with SpaceXAI. Built with Grok Build.
 
 ## How to use
 
