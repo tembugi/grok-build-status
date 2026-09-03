@@ -7,7 +7,7 @@ See **Grok Build**'s status from the Mac menu bar.
 - Jump to a live session from the menu
 - Check weekly usage
 
-Unofficial. Not affiliated with SpaceXAI. Built with Grok Build.
+Unofficial. Not affiliated with SpaceXAI.
 
 ## How to use
 
@@ -41,6 +41,8 @@ It reads Grok Build's local files under `~/.grok` so it can draw the icon and me
 It does not upload those files. Jumping to a session talks to Terminal or iTerm on this Mac only.
 
 ## From source
+
+Built with Grok Build.
 
 Swift 6.2 (Xcode or Command Line Tools) on Apple Silicon, macOS 14+.
 
