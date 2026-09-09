@@ -5,7 +5,7 @@ See **Grok Build**'s status from the Mac menu bar.
 - Animated to tell at a glance if a session is idle, running, waiting for you, or done
 - Get a Mac notification when Grok is waiting or done
 - Jump to a live session from the menu
-- Check weekly usage
+- Check weekly usage and when the next reset is
 
 Unofficial. Not affiliated with SpaceXAI.
 
@@ -15,11 +15,11 @@ Download [GrokBuildStatus.dmg](https://github.com/tembugi/grok-build-status/rele
 
 First launch may be blocked. Right-click the app, choose Open, then Open again.
 
-Click the menu bar icon for live sessions, weekly usage, Notifications, and Start on login. Click a session to jump to it. Sessions in the same Terminal or iTerm window are listed together. macOS may ask to let Grok Build Status control Terminal or iTerm.
+Click the menu bar icon to see details. Click a session to jump to it.
 
-Notifications are on by default. macOS will ask for permission the first time one would appear, or when you turn the switch on. Click a notification to jump to that session. Turn **Notifications** off in the menu if you do not want them.
+Notifications are on by default. macOS will ask for permission the first time one would appear, or when you turn the switch on. Click a notification to jump to that session. Turn **Notifications** off in the menu if you don't want them.
 
-Start on login only works after the app is in Applications.
+**Start on login** is in the menu. It only works after the app is in Applications.
 
 Drag the app to the Trash to remove it. Login is cleared automatically.
 
@@ -29,16 +29,7 @@ Drag the app to the Trash to remove it. Login is cleared automatically.
 
 ## Privacy
 
-Grok Build Status stays on your Mac. It does not open a network connection and does not send telemetry.
-
-It reads Grok Build's local files under `~/.grok` so it can draw the icon and menu:
-
-- `active_sessions.json` — which sessions are live
-- `sessions/.../events.jsonl` — running / waiting / done
-- `sessions/.../summary.json` — title when two sessions share a folder
-- `logs/unified.jsonl` — latest billing line for weekly usage
-
-It does not upload those files. Jumping to a session talks to Terminal or iTerm on this Mac only.
+Grok Build Status stays on your Mac. It only reads what it needs to function. It does not collect your information or send telemetry.
 
 ## From source
 
@@ -52,10 +43,6 @@ swift test
 ```
 
 `./package.sh` runs tests, then writes `dist/GrokBuildStatus.dmg`.
-
-`GrokBuildStatus --print` writes the current combined status (`inactive`, `idle`, `running`, `waiting`, `done`) and exits.
-
-Layout: `GrokBuildStatusCore` reads `~/.grok` and has no UI. `GrokBuildStatus` is the menu bar extra (`SessionStore` watches the files, `StatusItemController` draws the icon and menu). The icon animates only while a session is running, or waiting/done on a tab you have not selected, and sleeps when the extra is hidden.
 
 ## License
 
