@@ -4,9 +4,6 @@ import GrokBuildStatusCore
 /// Live Terminal / iTerm windows and the TTYs of their tabs.
 @MainActor
 enum HostWindows {
-    private static let terminalBundleID = "com.apple.Terminal"
-    private static let itermBundleID = "com.googlecode.iterm2"
-
     private static var cache: (at: TimeInterval, windows: [HostWindow])?
 
     private static let terminalRosterScript = NSAppleScript(source: """
@@ -61,36 +58,22 @@ enum HostWindows {
 
     private static func fetch() -> [HostWindow] {
         var windows: [HostWindow] = []
-        for app in NSWorkspace.shared.runningApplications {
-            switch app.bundleIdentifier {
-            case terminalBundleID:
-                if let text = appleScriptText(script: terminalRosterScript) {
-                    windows.append(contentsOf: parse(text, bundleID: terminalBundleID, title: "Terminal"))
-                }
-            case itermBundleID:
-                if let text = appleScriptText(script: itermRosterScript) {
-                    windows.append(contentsOf: parse(text, bundleID: itermBundleID, title: "iTerm"))
-                }
-            default:
-                break
-            }
+        if isRunning(.terminal), let text = AppleScript.string(from: terminalRosterScript) {
+            windows.append(contentsOf: parse(text, app: .terminal))
+        }
+        if isRunning(.iTerm), let text = AppleScript.string(from: itermRosterScript) {
+            windows.append(contentsOf: parse(text, app: .iTerm))
         }
         return windows
     }
 
-    private static func parse(_ text: String, bundleID: String, title: String) -> [HostWindow] {
-        HostWindowRoster.parse(text).map { draft in
-            HostWindow(id: "\(bundleID):\(draft.scriptID)", title: title, ttys: draft.ttys)
-        }
+    private static func isRunning(_ app: HostApp) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == app.bundleID }
     }
 
-    private static func appleScriptText(script: NSAppleScript?) -> String? {
-        guard let script else { return nil }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        if error == nil, let text = result.stringValue, !text.isEmpty {
-            return text
+    private static func parse(_ text: String, app: HostApp) -> [HostWindow] {
+        HostWindowRoster.parse(text).map { draft in
+            HostWindow(id: "\(app.bundleID):\(draft.scriptID)", title: app.title, ttys: draft.ttys)
         }
-        return nil
     }
 }

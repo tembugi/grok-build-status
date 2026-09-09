@@ -19,7 +19,7 @@ public enum GrokMark {
         return path.copy() ?? path
     }()
 
-    static func append(_ d: String, to path: CGMutablePath) {
+    private static func append(_ d: String, to path: CGMutablePath) {
         let tokens = tokenize(d)
         var i = 0
         var x: CGFloat = 0

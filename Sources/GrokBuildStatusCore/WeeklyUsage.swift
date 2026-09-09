@@ -237,18 +237,28 @@ public final class WeeklyUsageReader: @unchecked Sendable {
     }
 
     private func ingest(_ data: Data) {
-        pending.append(data)
-        if pending.count > 1_048_576 {
-            pending.removeAll(keepingCapacity: false)
-            return
+        var buffer: Data
+        if pending.isEmpty {
+            buffer = data
+        } else {
+            buffer = pending
+            buffer.append(data)
         }
-        while let newline = pending.firstRange(of: Data([0x0A])) {
-            let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
-            pending.removeSubrange(..<newline.upperBound)
+        pending = Data()
+        var start = buffer.startIndex
+        while let newline = buffer[start...].firstRange(of: Data([0x0A])) {
+            let line = buffer[start..<newline.lowerBound]
+            start = newline.upperBound
             if let text = String(data: line, encoding: .utf8),
                let parsed = WeeklyUsage.parse(line: text)
             {
                 latest = parsed
+            }
+        }
+        if start < buffer.endIndex {
+            pending = Data(buffer[start...])
+            if pending.count > 1_048_576 {
+                pending = Data()
             }
         }
     }

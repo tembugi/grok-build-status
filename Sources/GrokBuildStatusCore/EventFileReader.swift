@@ -64,7 +64,8 @@ public final class EventFileReader: @unchecked Sendable {
         if start < buffer.endIndex {
             pending = Data(buffer[start...])
             if pending.count > Self.maxPendingBytes {
-                reset()
+                pending = Data()
+                state = SessionRuntimeState()
             }
         }
     }

@@ -30,26 +30,26 @@ public struct SessionGroup: Equatable, Sendable {
     }
 }
 
-public struct HostWindowDraft: Equatable, Sendable {
-    public var scriptID: String
-    public var ttys: Set<String>
-
-    public init(scriptID: String, ttys: Set<String>) {
-        self.scriptID = scriptID
-        self.ttys = ttys
-    }
-}
-
 public enum HostWindowRoster {
+    public struct Window: Equatable, Sendable {
+        public var scriptID: String
+        public var ttys: Set<String>
+
+        public init(scriptID: String, ttys: Set<String>) {
+            self.scriptID = scriptID
+            self.ttys = ttys
+        }
+    }
+
     /// Parses the `W|id|…` / `T|tty` roster from Terminal or iTerm.
-    public static func parse(_ text: String) -> [HostWindowDraft] {
-        var drafts: [HostWindowDraft] = []
+    public static func parse(_ text: String) -> [Window] {
+        var drafts: [Window] = []
         var scriptID: String?
         var ttys: Set<String> = []
 
         func flush() {
             guard let scriptID, !ttys.isEmpty else { return }
-            drafts.append(HostWindowDraft(scriptID: scriptID, ttys: ttys))
+            drafts.append(Window(scriptID: scriptID, ttys: ttys))
         }
 
         for line in text.split(whereSeparator: \.isNewline) {

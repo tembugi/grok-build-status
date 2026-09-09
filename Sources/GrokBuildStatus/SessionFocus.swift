@@ -41,12 +41,12 @@ enum SessionFocus {
             return tabTTYCache.tty
         }
         let tty: String?
-        switch front.bundleIdentifier {
-        case "com.apple.Terminal":
-            tty = ProcessLiveness.normalizedTTY(appleScriptText(script: terminalSelectedTTYScript))
-        case "com.googlecode.iterm2":
-            tty = ProcessLiveness.normalizedTTY(appleScriptText(script: itermSelectedTTYScript))
-        default:
+        switch HostApp(bundleID: front.bundleIdentifier ?? "") {
+        case .terminal:
+            tty = ProcessLiveness.normalizedTTY(AppleScript.string(from: terminalSelectedTTYScript))
+        case .iTerm:
+            tty = ProcessLiveness.normalizedTTY(AppleScript.string(from: itermSelectedTTYScript))
+        case nil:
             tty = nil
         }
         tabTTYCache = (frontPID, now, tty)
@@ -69,9 +69,9 @@ enum SessionFocus {
         let alreadyFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
             == app.processIdentifier
         var selectedTab = false
-        if let bundleID = app.bundleIdentifier {
+        if let bundleID = app.bundleIdentifier, let host = HostApp(bundleID: bundleID) {
             selectedTab = activateTTYHost(
-                bundleID: bundleID,
+                host,
                 tty: tty,
                 folder: folder,
                 bringForward: !alreadyFront
@@ -85,18 +85,16 @@ enum SessionFocus {
     }
 
     private static func activateTTYHost(
-        bundleID: String,
+        _ host: HostApp,
         tty: String?,
         folder: String,
         bringForward: Bool
     ) -> Bool {
-        switch bundleID {
-        case "com.apple.Terminal":
+        switch host {
+        case .terminal:
             return activateTerminalTab(tty: tty, folder: folder, bringForward: bringForward)
-        case "com.googlecode.iterm2":
+        case .iTerm:
             return activateITermSession(tty: tty, folder: folder, bringForward: bringForward)
-        default:
-            return false
         }
     }
 
@@ -108,7 +106,7 @@ enum SessionFocus {
     }
 
     private static func scriptSucceeded(_ source: String) -> Bool {
-        let text = appleScriptText(source)?
+        let text = AppleScript.string(fromSource: source)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         return text == "true"
@@ -162,7 +160,7 @@ enum SessionFocus {
     }
 
     private static func activateTerminalTab(tty: String?, folder: String, bringForward: Bool) -> Bool {
-        let ttyNeedle = sanitizedTTY(tty ?? "") ?? ""
+        let ttyNeedle = ProcessLiveness.normalizedTTY(tty) ?? ""
         let titleNeedle = folder
         guard !ttyNeedle.isEmpty || !titleNeedle.isEmpty else { return false }
         let activateLine = bringForward ? "activate" : ""
@@ -211,7 +209,7 @@ enum SessionFocus {
     }
 
     private static func activateITermSession(tty: String?, folder: String, bringForward: Bool) -> Bool {
-        let ttyNeedle = sanitizedTTY(tty ?? "") ?? ""
+        let ttyNeedle = ProcessLiveness.normalizedTTY(tty) ?? ""
         let titleNeedle = folder
         guard !ttyNeedle.isEmpty || !titleNeedle.isEmpty else { return false }
         let activateLine = bringForward ? "activate" : ""
@@ -248,40 +246,5 @@ enum SessionFocus {
         )
     }
 
-    private static func sanitizedTTY(_ name: String) -> String? {
-        ProcessLiveness.normalizedTTY(name)
-    }
-
-    private static func appleScriptText(script: NSAppleScript?) -> String? {
-        guard let script else { return nil }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        if error == nil, let text = result.stringValue, !text.isEmpty {
-            return text
-        }
-        return nil
-    }
-
-    private static func appleScriptText(_ source: String) -> String? {
-        if let text = appleScriptText(script: NSAppleScript(source: source)) {
-            return text
-        }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", source]
-        let out = Pipe()
-        proc.standardOutput = out
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            let text = String(decoding: data, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
-        } catch {
-            return nil
-        }
-    }
 }
+
