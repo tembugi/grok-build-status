@@ -2,6 +2,65 @@ import Foundation
 import Testing
 @testable import GrokBuildStatusCore
 
+struct AppVersionTests {
+    @Test func parsesCommonTagShapes() {
+        #expect(SemanticVersion("1.0.0") == SemanticVersion(major: 1, minor: 0, patch: 0))
+        #expect(SemanticVersion("v1.0.0") == SemanticVersion(major: 1, minor: 0, patch: 0))
+        #expect(SemanticVersion("v.1.0.1") == SemanticVersion(major: 1, minor: 0, patch: 1))
+        #expect(SemanticVersion("1.2") == SemanticVersion(major: 1, minor: 2, patch: 0))
+        #expect(SemanticVersion("not-a-version") == nil)
+    }
+
+    @Test func comparesSemver() {
+        let older = SemanticVersion("1.0.0")!
+        let newer = SemanticVersion("v.1.0.1")!
+        #expect(older < newer)
+        #expect(!(newer < older))
+        #expect(older != newer)
+    }
+
+    @Test func parsesGitHubLatestRelease() throws {
+        let json = """
+        {
+          "tag_name": "v.1.0.1",
+          "prerelease": false,
+          "assets": [
+            {
+              "name": "GrokBuildStatus.dmg",
+              "size": 538417,
+              "browser_download_url": "https://github.com/tembugi/grok-build-status/releases/download/v.1.0.1/GrokBuildStatus.dmg"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let release = try #require(GitHubRelease.parseLatest(from: json))
+        #expect(release.tag == "v.1.0.1")
+        #expect(release.version == SemanticVersion(major: 1, minor: 0, patch: 1))
+        #expect(release.dmgBytes == 538417)
+        #expect(release.dmgURL.lastPathComponent == "GrokBuildStatus.dmg")
+        #expect(DownloadSafety.isTrustedGitHub(release.dmgURL))
+    }
+
+    @Test func skipsPrereleaseAndMissingDMG() {
+        let pre = """
+        {"tag_name":"v2.0.0","prerelease":true,"assets":[{"name":"GrokBuildStatus.dmg","size":1,"browser_download_url":"https://github.com/tembugi/grok-build-status/releases/download/v2.0.0/GrokBuildStatus.dmg"}]}
+        """.data(using: .utf8)!
+        #expect(GitHubRelease.parseLatest(from: pre) == nil)
+
+        let noDMG = """
+        {"tag_name":"v2.0.0","prerelease":false,"assets":[{"name":"source.zip","size":1,"browser_download_url":"https://github.com/tembugi/grok-build-status/archive/v2.0.0.zip"}]}
+        """.data(using: .utf8)!
+        #expect(GitHubRelease.parseLatest(from: noDMG) == nil)
+    }
+
+    @Test func rejectsOffSiteDownloads() {
+        #expect(DownloadSafety.isTrustedGitHub(URL(string: "https://github.com/tembugi/x/releases/download/v1/GrokBuildStatus.dmg")!))
+        #expect(DownloadSafety.isTrustedGitHub(URL(string: "https://objects.githubusercontent.com/github-production-release-asset-2e65be/foo")!))
+        #expect(!DownloadSafety.isTrustedGitHub(URL(string: "http://github.com/tembugi/x/a.dmg")!))
+        #expect(!DownloadSafety.isTrustedGitHub(URL(string: "https://evil.example/GrokBuildStatus.dmg")!))
+    }
+}
+
 struct SessionRuntimeStateTests {
     @Test func idleByDefault() {
         #expect(SessionRuntimeState().light == .idle)
@@ -463,13 +522,21 @@ struct WeeklyUsageTests {
             period: .weekly,
             periodEnd: Date(timeIntervalSince1970: 1_788_546_680)
         )
-        let label = usage.resetLabel(locale: Locale(identifier: "en_GB"))
-        #expect(label?.hasPrefix("Resets ") == true)
-        #expect(label?.contains(":") == true)
+        let us = usage.resetLabel(locale: Locale(identifier: "en_US"))
+        #expect(us?.hasPrefix("Resets ") == true)
+        #expect(us?.contains("Friday") == true)
+        #expect(us?.contains("9/4/2026") == true)
+        #expect(us?.contains("AM") == true || us?.contains("PM") == true)
+        let finland = usage.resetLabel(locale: Locale(identifier: "en_FI"))
+        #expect(finland?.hasPrefix("Resets ") == true)
+        #expect(finland?.contains("Friday") == true)
+        #expect(finland?.contains("4.9.2026") == true)
+        #expect(finland?.contains(":") == true || finland?.contains(".") == true)
+        #expect(finland?.contains("AM") != true)
+        #expect(finland?.contains("PM") != true)
         usage.periodEnd = Date(timeIntervalSince1970: 1_788_000_000)
-        let past = usage.resetLabel(locale: Locale(identifier: "en_GB"))
+        let past = usage.resetLabel(locale: Locale(identifier: "en_US"))
         #expect(past?.hasPrefix("Resets ") == true)
-        #expect(past?.contains(":") == true)
     }
 
     @Test func countdownIncludesDaysHoursMinutesSeconds() {

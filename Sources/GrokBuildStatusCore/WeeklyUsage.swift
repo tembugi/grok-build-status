@@ -43,12 +43,24 @@ public struct WeeklyUsage: Equatable, Sendable {
         }
     }
 
-    public func resetLabel(locale: Locale = .current) -> String? {
+    /// English copy, system region for date order and 12/24-hour clock.
+    public static var englishSystemLocale: Locale {
+        var components = Locale.Components(locale: .current)
+        let region = Locale.current.region
+        components.languageComponents = Locale.Language.Components(
+            languageCode: Locale.LanguageCode("en"),
+            region: region
+        )
+        components.region = region
+        components.hourCycle = Locale.current.hourCycle
+        return Locale(components: components)
+    }
+
+    public func resetLabel(locale: Locale = WeeklyUsage.englishSystemLocale) -> String? {
         guard let periodEnd else { return nil }
         let formatter = DateFormatter()
         formatter.locale = locale
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.setLocalizedDateFormatFromTemplate("EEEE yMd jmm")
         formatter.doesRelativeDateFormatting = false
         return "Resets \(formatter.string(from: periodEnd))"
     }

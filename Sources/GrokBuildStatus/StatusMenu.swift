@@ -115,7 +115,9 @@ enum MenuRowStyle {
 final class KeyedMenuRow: MenuItemRowView {
     let titleField: NSTextField
     let valueField: NSTextField
-    var clickHandler: (() -> Void)?
+    var clickHandler: (() -> Void)? {
+        didSet { updateTrackingAreas() }
+    }
     private let style: MenuRowStyle
     private var hovered = false
     private var tracking: NSTrackingArea?
@@ -137,9 +139,10 @@ final class KeyedMenuRow: MenuItemRowView {
         addSubview(valueField)
     }
 
-    func setTitle(_ title: String, value: String) {
+    func setTitle(_ title: String, value: String, interactive: Bool = false) {
         titleField.stringValue = title
         valueField.stringValue = value
+        titleField.textColor = interactive ? .labelColor : style.titleColor
         needsLayout = true
         layoutSubtreeIfNeeded()
     }
@@ -288,6 +291,169 @@ final class UsageMenuRow: MenuItemRowView {
             y: countdownY,
             width: inner,
             height: MenuLayout.captionLabelHeight
+        )
+    }
+}
+
+final class UpdatePill: NSControl {
+    var title: String = "Update" {
+        didSet { invalidateIntrinsicContentSize(); needsDisplay = true }
+    }
+
+    private var hovered = false
+    private var pressed = false
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Update")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var isEnabled: Bool {
+        didSet { needsDisplay = true }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let text = MenuLayout.textWidth(title, font: MenuLayout.headingFont)
+        return NSSize(width: text + 16, height: 20)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        guard isEnabled, !isHidden else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled else { return }
+        hovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        pressed = false
+        needsDisplay = true
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        pressed = true
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let wasPressed = pressed
+        pressed = false
+        needsDisplay = true
+        let point = convert(event.locationInWindow, from: nil)
+        guard isEnabled, wasPressed, bounds.contains(point) else { return }
+        sendAction(action, to: target)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let fill: CGFloat
+        if !isEnabled {
+            fill = 0.06
+        } else if pressed {
+            fill = 0.22
+        } else if hovered {
+            fill = 0.16
+        } else {
+            fill = 0.08
+        }
+        NSColor.labelColor.withAlphaComponent(fill).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+
+        let color: NSColor = isEnabled ? .labelColor : .tertiaryLabelColor
+        let text = title as NSString
+        let font = MenuLayout.headingFont
+        let size = text.size(withAttributes: [.font: font])
+        let point = NSPoint(
+            x: ((bounds.width - size.width) / 2).rounded(),
+            y: ((bounds.height - size.height) / 2).rounded()
+        )
+        text.draw(at: point, withAttributes: [
+            .font: font,
+            .foregroundColor: color.withAlphaComponent(isEnabled ? 0.85 : 0.45),
+        ])
+    }
+}
+
+final class VersionMenuRow: MenuItemRowView {
+    let labelField: NSTextField
+    let updateButton: UpdatePill
+    var onUpdate: (() -> Void)?
+
+    init() {
+        labelField = menuLabel(
+            font: MenuLayout.headingFont,
+            color: .secondaryLabelColor,
+            truncates: true
+        )
+        updateButton = UpdatePill(frame: .zero)
+        updateButton.isHidden = true
+        super.init(height: MenuLayout.rowHeight)
+        addSubview(labelField)
+        addSubview(updateButton)
+        updateButton.target = self
+        updateButton.action = #selector(tapUpdate)
+    }
+
+    func set(label: String, showUpdate: Bool, updating: Bool = false) {
+        labelField.stringValue = label
+        updateButton.title = updating ? "Updating…" : "Update"
+        updateButton.isEnabled = showUpdate && !updating
+        updateButton.isHidden = !showUpdate && !updating
+        updateButton.invalidateIntrinsicContentSize()
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        updateButton.updateTrackingAreas()
+    }
+
+    @objc private func tapUpdate() {
+        onUpdate?()
+    }
+
+    override func layout() {
+        super.layout()
+        let inset = MenuLayout.inset
+        let gap = MenuLayout.gap
+        let buttonSize = updateButton.isHidden
+            ? .zero
+            : updateButton.intrinsicContentSize
+        if !updateButton.isHidden {
+            updateButton.frame = NSRect(
+                x: bounds.width - inset - buttonSize.width,
+                y: ((bounds.height - buttonSize.height) / 2).rounded(),
+                width: buttonSize.width,
+                height: buttonSize.height
+            )
+        }
+        let labelRight = updateButton.isHidden
+            ? bounds.width - inset
+            : updateButton.frame.minX - gap
+        let labelWidth = max(0, labelRight - inset)
+        labelField.preferredMaxLayoutWidth = labelWidth
+        labelField.frame = NSRect(
+            x: inset,
+            y: MenuLayout.centeredY(labelHeight: MenuLayout.headingLabelHeight, in: bounds.height),
+            width: labelWidth,
+            height: MenuLayout.headingLabelHeight
         )
     }
 }
