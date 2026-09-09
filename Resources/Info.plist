@@ -29,6 +29,6 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Grok Build Status talks to Terminal and iTerm so it can jump to a live session and notice when that tab is already selected.</string>
+	<string>Grok Build Status talks to Terminal and iTerm so it can jump to a live session, group sessions by window, and notice when that tab is already selected.</string>
 </dict>
 </plist>

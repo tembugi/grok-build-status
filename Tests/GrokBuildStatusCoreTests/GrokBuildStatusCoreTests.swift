@@ -260,6 +260,20 @@ struct EventFileReaderTests {
         #expect(reader.state.turnOpen == false)
     }
 
+    @Test func largeCompleteLogStaysRunning() {
+        let reader = EventFileReader()
+        let line = Data(#"{"type":"phase_changed","phase":"streaming_text"}\#n"#.utf8)
+        var data = Data()
+        data.reserveCapacity(320_000)
+        while data.count < 300_000 {
+            data.append(line)
+        }
+        data.append(Data(#"{"type":"turn_started"}\#n"#.utf8))
+        reader.ingest(data)
+        #expect(reader.state.light == .running)
+        #expect(reader.state.turnOpen == true)
+    }
+
     @Test func holdsIncompleteLastLine() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -582,5 +596,106 @@ struct GrokMarkTests {
         #expect(box.maxY < 480)
         #expect(box.width > 250)
         #expect(box.height > 250)
+    }
+}
+
+struct SessionGroupsTests {
+    private func row(_ id: String, pid: pid_t, light: TrafficLight = .idle) -> LiveSession {
+        LiveSession(
+            session: ActiveSession(sessionId: id, pid: pid, cwd: "/tmp/\(id)"),
+            light: light,
+            title: id
+        )
+    }
+
+    @Test func sessionsSharingAWindowAreOneGroup() {
+        let sessions = [row("a", pid: 1, light: .running), row("b", pid: 2)]
+        let groups = SessionGroups.make(
+            sessions: sessions,
+            windows: [HostWindow(id: "terminal:1", title: "Terminal", ttys: ["ttys000", "ttys001"])],
+            ttys: [1: "ttys000", 2: "ttys001"]
+        )
+        #expect(groups.map(\.id) == ["terminal:1"])
+        #expect(groups.first?.title == "Terminal 1")
+        #expect(groups.first?.sessions.map(\.session.sessionId) == ["a", "b"])
+    }
+
+    @Test func differentWindowsAreSeparateGroups() {
+        let sessions = [row("a", pid: 1, light: .waitingForInput), row("b", pid: 2)]
+        let groups = SessionGroups.make(
+            sessions: sessions,
+            windows: [
+                HostWindow(id: "terminal:1", title: "Terminal", ttys: ["ttys000"]),
+                HostWindow(id: "terminal:2", title: "Terminal", ttys: ["ttys001"]),
+            ],
+            ttys: [1: "ttys000", 2: "ttys001"]
+        )
+        #expect(groups.map(\.id) == ["terminal:1", "terminal:2"])
+        #expect(groups.map(\.title) == ["Terminal 1", "Terminal 2"])
+        #expect(groups[0].sessions.map(\.session.sessionId) == ["a"])
+        #expect(groups[1].sessions.map(\.session.sessionId) == ["b"])
+    }
+
+    @Test func unmappedSessionIsItsOwnGroup() {
+        let sessions = [row("a", pid: 1), row("b", pid: 2)]
+        let groups = SessionGroups.make(
+            sessions: sessions,
+            windows: [HostWindow(id: "terminal:1", title: "Terminal", ttys: ["ttys000"])],
+            ttys: [1: "ttys000"]
+        )
+        #expect(groups.map(\.id) == ["terminal:1", SessionGroup.fallbackID(sessionID: "b")])
+        #expect(groups.map(\.title) == ["Terminal 1", "Window 1"])
+        #expect(groups[1].sessions.map(\.session.sessionId) == ["b"])
+    }
+
+    @Test func emptyWindowsAreIgnored() {
+        let sessions = [row("a", pid: 1)]
+        let groups = SessionGroups.make(
+            sessions: sessions,
+            windows: [
+                HostWindow(id: "terminal:gone", title: "Terminal", ttys: ["ttys999"]),
+                HostWindow(id: "terminal:1", title: "Terminal", ttys: ["ttys000"]),
+            ],
+            ttys: [1: "ttys000"]
+        )
+        #expect(groups.map(\.id) == ["terminal:1"])
+    }
+
+    @Test func groupOrderFollowsFirstSession() {
+        let sessions = [row("z", pid: 2, light: .idle), row("a", pid: 1, light: .running)]
+        let groups = SessionGroups.make(
+            sessions: sessions,
+            windows: [
+                HostWindow(id: "terminal:2", title: "Terminal", ttys: ["ttys001"]),
+                HostWindow(id: "terminal:1", title: "Terminal", ttys: ["ttys000"]),
+            ],
+            ttys: [1: "ttys000", 2: "ttys001"]
+        )
+        #expect(groups.map(\.id) == ["terminal:2", "terminal:1"])
+        #expect(groups.map(\.title) == ["Terminal 1", "Terminal 2"])
+    }
+
+    @Test func numbersHostsSeparately() {
+        let groups = SessionGroups.numbered([
+            SessionGroup(id: "t1", title: "Terminal", sessions: [row("a", pid: 1)]),
+            SessionGroup(id: "i1", title: "iTerm", sessions: [row("b", pid: 2)]),
+            SessionGroup(id: "t2", title: "Terminal", sessions: [row("c", pid: 3)]),
+        ])
+        #expect(groups.map(\.title) == ["Terminal 1", "iTerm 1", "Terminal 2"])
+    }
+
+    @Test func parsesTerminalRoster() {
+        let text = """
+        W|7341|276|261|1115|762
+        T|/dev/ttys001
+        W|7220|0|33|758|956
+        T|/dev/ttys000
+        T|/dev/ttys002
+        W|9|0|0|0|0
+        """
+        let drafts = HostWindowRoster.parse(text)
+        #expect(drafts.map(\.scriptID) == ["7341", "7220"])
+        #expect(drafts[0].ttys == ["ttys001"])
+        #expect(drafts[1].ttys == ["ttys000", "ttys002"])
     }
 }

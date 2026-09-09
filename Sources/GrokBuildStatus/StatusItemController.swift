@@ -8,9 +8,17 @@ private enum MenuLayout {
     static let gap: CGFloat = 12
     static let rowHeight: CGFloat = 32
     static let headingHeight: CGFloat = 24
+    static let rowLabelHeight: CGFloat = 20
+    static let headingLabelHeight: CGFloat = 16
+    static let captionLabelHeight: CGFloat = 14
+    static var usageHeight: CGFloat { rowHeight + headingHeight * 2 }
 
     static var rowFont: NSFont { NSFont.menuFont(ofSize: 0) }
     static var headingFont: NSFont { NSFont.menuFont(ofSize: NSFont.smallSystemFontSize) }
+
+    static func centeredY(labelHeight: CGFloat, in rowHeight: CGFloat, at offset: CGFloat = 0) -> CGFloat {
+        offset + ((rowHeight - labelHeight) / 2).rounded()
+    }
 
     static func textWidth(_ string: String, font: NSFont?) -> CGFloat {
         guard !string.isEmpty else { return 0 }
@@ -48,6 +56,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var lightsByID: [String: TrafficLight] = [:]
     private var iconVisible = true
     private var menuIsOpen = false
+    private var groups: [SessionGroup] = []
+    private var groupTimer: Timer?
 
     override init() {
         item = NSStatusBar.system.statusItem(withLength: GrokMarkImage.pointSize.width)
@@ -116,6 +126,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menuIsOpen = true
+        refreshGroups(forceWindows: true)
         rebuildSessionItems(in: menu)
         bindSnapshotToMenu()
         syncNotificationsSwitch()
@@ -125,6 +136,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) {
         menuIsOpen = false
         stopCountdownClock()
+        stopGroupClock()
     }
 
     private func rebuildSessionItems(in menu: NSMenu) {
@@ -137,8 +149,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let insertAt = menu.items.firstIndex(of: usageItem) else { return }
 
         var items: [NSMenuItem] = []
-        for row in snapshot.sessions {
-            items.append(makeSessionMenuItem(row))
+        for (index, group) in groups.enumerated() {
+            if index > 0 {
+                items.append(.separator())
+            }
+            items.append(makeGroupHeaderItem(group))
+            for row in group.sessions {
+                items.append(makeSessionMenuItem(row))
+            }
         }
         items.append(.separator())
         for (offset, item) in items.enumerated() {
@@ -146,8 +164,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func makeGroupHeaderItem(_ group: SessionGroup) -> NSMenuItem {
+        let row = KeyedMenuRow(style: .group)
+        row.setTitle(group.title, value: TrafficLight.countSummary(group.sessions.map(\.light)) ?? "")
+        let item = NSMenuItem()
+        item.view = row
+        item.representedObject = group.id
+        return item
+    }
+
     private func makeSessionsHeaderItem() -> NSMenuItem {
-        let row = KeyedMenuRow(compact: true)
+        let row = KeyedMenuRow(style: .section)
         row.setTitle("Sessions", value: "None")
         let item = NSMenuItem()
         item.view = row
@@ -346,13 +373,62 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if needsAnimation {
             startAnimating()
         }
+        let previousGroups = groupingSignature(groups)
+        refreshGroups()
+        let groupingChanged = groupingSignature(groups) != previousGroups
         render()
         if menuIsOpen {
-            if idsChanged, let menu = item.menu {
+            if idsChanged || groupingChanged, let menu = item.menu {
                 rebuildSessionItems(in: menu)
             }
             bindSnapshotToMenu()
         }
+    }
+
+    private func groupingSignature(_ groups: [SessionGroup]) -> [[String]] {
+        groups.map { [$0.id, $0.title] + $0.sessions.map(\.session.sessionId) }
+    }
+
+    private func refreshGroups(forceWindows: Bool = false) {
+        let windows = snapshot.sessions.isEmpty ? [] : HostWindows.list(force: forceWindows)
+        var ttys: [pid_t: String] = [:]
+        for row in snapshot.sessions {
+            if let tty = ProcessLiveness.ttyName(of: row.session.pid) {
+                ttys[row.session.pid] = tty
+            }
+        }
+        groups = SessionGroups.make(sessions: snapshot.sessions, windows: windows, ttys: ttys)
+        startGroupClock()
+    }
+
+    private func startGroupClock() {
+        guard menuIsOpen, !snapshot.sessions.isEmpty else {
+            stopGroupClock()
+            return
+        }
+        guard groupTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, target: self, selector: #selector(tickGroups), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        groupTimer = timer
+    }
+
+    private func stopGroupClock() {
+        groupTimer?.invalidate()
+        groupTimer = nil
+    }
+
+    @objc private func tickGroups() {
+        guard menuIsOpen else {
+            stopGroupClock()
+            return
+        }
+        let before = groupingSignature(groups)
+        refreshGroups(forceWindows: true)
+        if groupingSignature(groups) != before, let menu = item.menu {
+            rebuildSessionItems(in: menu)
+        }
+        bindSnapshotToMenu()
     }
 
     /// Paints the current snapshot onto whatever rows already exist.
@@ -363,8 +439,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             header.setTitle("Sessions", value: sessionsCountLabel(snapshot.sessions))
         }
         for item in menu.items {
-            guard let id = item.representedObject as? String,
-                  let row = snapshot.sessions.first(where: { $0.session.sessionId == id })
+            guard let id = item.representedObject as? String else { continue }
+            if let group = groups.first(where: { $0.id == id }),
+               let view = item.view as? KeyedMenuRow
+            {
+                view.setTitle(group.title, value: TrafficLight.countSummary(group.sessions.map(\.light)) ?? "")
+                continue
+            }
+            guard let row = snapshot.sessions.first(where: { $0.session.sessionId == id })
             else { continue }
             item.title = "\(row.title), \(row.light.menuLabel)"
             item.toolTip = row.light.tooltip
@@ -585,29 +667,42 @@ private class MenuItemRowView: NSView {
     }
 }
 
+private enum MenuRowStyle {
+    /// Section title, same weight as Notifications / Start on login.
+    case section
+    /// Subhead inside a section, smaller grey type.
+    case group
+    /// Clickable session row.
+    case row
+
+    var compact: Bool { self == .group }
+    var font: NSFont { compact ? MenuLayout.headingFont : MenuLayout.rowFont }
+    var titleColor: NSColor { self == .row ? .labelColor : .secondaryLabelColor }
+    var height: CGFloat { compact ? MenuLayout.headingHeight : MenuLayout.rowHeight }
+}
+
 /// One menu row: title on the left, grey value on the right.
 private final class KeyedMenuRow: MenuItemRowView {
     let titleField: NSTextField
     let valueField: NSTextField
     var clickHandler: (() -> Void)?
-    private let compact: Bool
+    private let style: MenuRowStyle
     private var hovered = false
     private var tracking: NSTrackingArea?
 
-    init(compact: Bool = false) {
-        self.compact = compact
-        let font = compact ? MenuLayout.headingFont : MenuLayout.rowFont
+    init(style: MenuRowStyle = .row) {
+        self.style = style
         titleField = menuLabel(
-            font: font,
-            color: compact ? .secondaryLabelColor : .labelColor,
+            font: style.font,
+            color: style.titleColor,
             truncates: true
         )
         valueField = menuLabel(
-            font: font,
+            font: style.font,
             color: .secondaryLabelColor,
             alignment: .right
         )
-        super.init(height: compact ? MenuLayout.headingHeight : MenuLayout.rowHeight)
+        super.init(height: style.height)
         addSubview(titleField)
         addSubview(valueField)
     }
@@ -621,8 +716,10 @@ private final class KeyedMenuRow: MenuItemRowView {
 
     override func layout() {
         super.layout()
-        let labelHeight: CGFloat = compact ? 16 : 20
-        let y = ((bounds.height - labelHeight) / 2).rounded()
+        let labelHeight: CGFloat = style.compact
+            ? MenuLayout.headingLabelHeight
+            : MenuLayout.rowLabelHeight
+        let y = MenuLayout.centeredY(labelHeight: labelHeight, in: bounds.height)
         let frames = trailingValueFrame(for: valueField, y: y, height: labelHeight)
         valueField.frame = frames.value
         titleField.preferredMaxLayoutWidth = frames.title.width
@@ -682,12 +779,17 @@ private final class UsageMenuRow: MenuItemRowView {
     let countdownField: NSTextField
 
     init() {
-        titleField = menuLabel(font: MenuLayout.rowFont, truncates: true)
+        titleField = menuLabel(
+            font: MenuLayout.rowFont,
+            color: .secondaryLabelColor,
+            truncates: true
+        )
         percentField = menuLabel(
             font: NSFont.monospacedDigitSystemFont(
                 ofSize: NSFont.systemFontSize,
                 weight: .regular
             ),
+            color: .secondaryLabelColor,
             alignment: .right
         )
         resetField = menuLabel(
@@ -701,7 +803,7 @@ private final class UsageMenuRow: MenuItemRowView {
             ),
             color: .secondaryLabelColor
         )
-        super.init(height: 60)
+        super.init(height: MenuLayout.usageHeight)
         addSubview(titleField)
         addSubview(percentField)
         addSubview(resetField)
@@ -721,14 +823,42 @@ private final class UsageMenuRow: MenuItemRowView {
         super.layout()
         let inset = MenuLayout.inset
         let inner = max(0, bounds.width - inset * 2)
-        let frames = trailingValueFrame(for: percentField, y: 38, height: 18)
+        let titleY = MenuLayout.centeredY(
+            labelHeight: MenuLayout.rowLabelHeight,
+            in: MenuLayout.rowHeight,
+            at: MenuLayout.headingHeight * 2
+        )
+        let resetY = MenuLayout.centeredY(
+            labelHeight: MenuLayout.headingLabelHeight,
+            in: MenuLayout.headingHeight,
+            at: MenuLayout.headingHeight
+        )
+        let countdownY = MenuLayout.centeredY(
+            labelHeight: MenuLayout.captionLabelHeight,
+            in: MenuLayout.headingHeight
+        )
+        let frames = trailingValueFrame(
+            for: percentField,
+            y: titleY,
+            height: MenuLayout.rowLabelHeight
+        )
         percentField.frame = frames.value
         titleField.preferredMaxLayoutWidth = frames.title.width
         titleField.frame = frames.title
         resetField.preferredMaxLayoutWidth = inner
         countdownField.preferredMaxLayoutWidth = inner
-        resetField.frame = NSRect(x: inset, y: 20, width: inner, height: 16)
-        countdownField.frame = NSRect(x: inset, y: 4, width: inner, height: 14)
+        resetField.frame = NSRect(
+            x: inset,
+            y: resetY,
+            width: inner,
+            height: MenuLayout.headingLabelHeight
+        )
+        countdownField.frame = NSRect(
+            x: inset,
+            y: countdownY,
+            width: inner,
+            height: MenuLayout.captionLabelHeight
+        )
     }
 }
 
@@ -740,7 +870,7 @@ private final class SwitchMenuRow: MenuItemRowView {
         labelField = menuLabel(font: MenuLayout.rowFont)
         labelField.stringValue = title
         toggle = AppleSwitch(frame: NSRect(x: 0, y: 0, width: 40, height: 24))
-        super.init(height: 32)
+        super.init(height: MenuLayout.rowHeight)
         addSubview(labelField)
         addSubview(toggle)
     }
@@ -757,6 +887,11 @@ private final class SwitchMenuRow: MenuItemRowView {
             height: switchSize.height
         )
         let labelWidth = max(0, toggle.frame.minX - gap - inset)
-        labelField.frame = NSRect(x: inset, y: 6, width: labelWidth, height: 20)
+        labelField.frame = NSRect(
+            x: inset,
+            y: MenuLayout.centeredY(labelHeight: MenuLayout.rowLabelHeight, in: bounds.height),
+            width: labelWidth,
+            height: MenuLayout.rowLabelHeight
+        )
     }
 }

@@ -15,7 +15,7 @@ Download [GrokBuildStatus.dmg](https://github.com/tembugi/grok-build-status/rele
 
 First launch may be blocked. Right-click the app, choose Open, then Open again.
 
-Click the menu bar icon for live sessions, weekly usage, Notifications, and Start on login. Click a session to jump to it. macOS may ask to let Grok Build Status control Terminal or iTerm.
+Click the menu bar icon for live sessions, weekly usage, Notifications, and Start on login. Click a session to jump to it. Sessions in the same Terminal or iTerm window are listed together. macOS may ask to let Grok Build Status control Terminal or iTerm.
 
 Notifications are on by default. macOS will ask for permission the first time one would appear, or when you turn the switch on. Click a notification to jump to that session. Turn **Notifications** off in the menu if you do not want them.
 

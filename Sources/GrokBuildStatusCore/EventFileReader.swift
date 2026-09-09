@@ -4,6 +4,7 @@ public final class EventFileReader: @unchecked Sendable {
     public private(set) var state = SessionRuntimeState()
     private var offset: UInt64 = 0
     private var pending = Data()
+    /// Unfinished last line only. Complete events are applied as they arrive.
     private static let maxPendingBytes = 262_144
 
     public init() {}
@@ -47,15 +48,24 @@ public final class EventFileReader: @unchecked Sendable {
     }
 
     public func ingest(_ data: Data) {
-        pending.append(data)
-        if pending.count > Self.maxPendingBytes {
-            reset()
-            return
+        var buffer: Data
+        if pending.isEmpty {
+            buffer = data
+        } else {
+            buffer = pending
+            buffer.append(data)
         }
-        while let newline = pending.firstRange(of: Data([0x0A])) {
-            let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
-            pending.removeSubrange(..<newline.upperBound)
-            apply(line)
+        pending = Data()
+        var start = buffer.startIndex
+        while let newline = buffer[start...].firstRange(of: Data([0x0A])) {
+            apply(buffer[start..<newline.lowerBound])
+            start = newline.upperBound
+        }
+        if start < buffer.endIndex {
+            pending = Data(buffer[start...])
+            if pending.count > Self.maxPendingBytes {
+                reset()
+            }
         }
     }
 
