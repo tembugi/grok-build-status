@@ -100,7 +100,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         render()
-        Task { await refreshLatest(force: true) }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -347,31 +346,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func syncUpdateRows() {
-        let current = AppUpdate.current.display
         guard let row = versionRow else { return }
-
-        if let latest = latestRelease, latest.version > AppUpdate.current {
-            row.set(
-                label: "Version \(current) (v.\(latest.version.display) available)",
-                showUpdate: true
-            )
-            row.toolTip = "Open the GitHub releases page."
-            return
-        }
-
-        if checkingLatest, latestRelease == nil {
-            row.set(label: "Version \(current)", showUpdate: false)
-            row.toolTip = nil
-            return
-        }
-
-        row.set(label: "Version \(current) (current)", showUpdate: false)
-        row.toolTip = latestCheckFailed ? "Could not reach GitHub releases." : nil
+        let line = VersionLine.make(
+            installed: AppUpdate.installedVersion,
+            latest: latestRelease,
+            checking: checkingLatest,
+            failed: latestCheckFailed
+        )
+        row.set(label: line.label, showUpdate: line.showUpdate)
+        row.toolTip = line.toolTip
     }
 
-    private func refreshLatest(force: Bool = false) async {
+    private func refreshLatest() async {
         let now = CACurrentMediaTime()
-        if !force, lastLatestCheck > 0, now - lastLatestCheck < 15 * 60 {
+        if lastLatestCheck > 0, now - lastLatestCheck < 15 * 60 {
             syncUpdateRows()
             return
         }

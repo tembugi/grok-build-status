@@ -24,6 +24,10 @@ mkdir -p dist
 swift test
 ./scripts/bundle-app.sh release "$STAGE/${APP_NAME}.app"
 ln -s /Applications "$STAGE/Applications"
+mkdir -p "$STAGE/.background"
+swift ./scripts/render-dmg-background.swift "$STAGE/.background/background.png"
+sips -s dpiWidth 144 -s dpiHeight 144 "$STAGE/.background/background.png" >/dev/null
+chflags hidden "$STAGE/.background"
 
 hdiutil detach "/Volumes/${APP_NAME}" >/dev/null 2>&1 || true
 hdiutil detach "/Volumes/${APP_NAME} 1" >/dev/null 2>&1 || true
@@ -50,13 +54,21 @@ tell application "Finder"
     set toolbar visible of container window to false
     set statusbar visible of container window to false
     try
+      set pathbar visible of container window to false
+    end try
+    try
       set sidebar width of container window to 0
     end try
-    set bounds of container window to {360, 160, 900, 520}
+    set bounds of container window to {400, 200, 940, 580}
     set theView to icon view options of container window
     set arrangement of theView to not arranged
     set icon size of theView to 128
-    set background color of theView to {58000, 58000, 58000}
+    set text size of theView to 12
+    set label position of theView to bottom
+    try
+      set shows item info of theView to false
+    end try
+    set background picture of theView to file ".background:background.png"
     delay 0.4
     set position of item "${APP_NAME}.app" of container window to {150, 180}
     set position of item "Applications" of container window to {390, 180}

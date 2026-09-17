@@ -4,7 +4,6 @@ import GrokBuildStatusCore
 enum AppUpdateError: Error {
     case badResponse
     case noRelease
-    case untrustedURL
 }
 
 /// Fetches the GitHub release so the menu can offer the releases page.
@@ -18,28 +17,12 @@ enum AppUpdate {
         return SemanticVersion(raw ?? "") ?? SemanticVersion(major: 0, minor: 0, patch: 0)
     }
 
-    /// `--pretend-version 1.0.0` lies to the menu so Update can be laid out.
-    static var pretendVersion: SemanticVersion? {
-        let args = CommandLine.arguments
-        guard let flag = args.firstIndex(of: "--pretend-version") else { return nil }
-        let value = args.index(after: flag)
-        guard value < args.endIndex else { return nil }
-        return SemanticVersion(args[value])
-    }
-
-    static var current: SemanticVersion {
-        pretendVersion ?? installedVersion
-    }
-
     static func fetchLatest() async throws -> GitHubRelease {
-        guard DownloadSafety.isTrustedGitHub(latestAPI) else {
-            throw AppUpdateError.untrustedURL
-        }
         var request = URLRequest(url: latestAPI)
         request.setValue("GrokBuildStatus/\(installedVersion.display)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 20
-        let (data, response) = try await GitHubHTTP.shared.session.data(for: request)
+        let (data, response) = try await GitHubHTTP.session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
             throw AppUpdateError.badResponse
         }
@@ -50,28 +33,16 @@ enum AppUpdate {
     }
 }
 
-private final class GitHubHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    static let shared = GitHubHTTP()
-
-    lazy var session: URLSession = {
+private enum GitHubHTTP {
+    static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 20
         config.waitsForConnectivity = false
         config.httpAdditionalHeaders = [
             "User-Agent": "GrokBuildStatus/\(AppUpdate.installedVersion.display)",
             "Accept": "application/vnd.github+json",
         ]
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        return URLSession(configuration: config)
     }()
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest
-    ) async -> URLRequest? {
-        guard let url = request.url, DownloadSafety.isTrustedGitHub(url) else { return nil }
-        return request
-    }
 }

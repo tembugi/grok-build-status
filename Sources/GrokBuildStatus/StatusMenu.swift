@@ -1,7 +1,6 @@
 import AppKit
 
 enum MenuLayout {
-    static let width: CGFloat = 252
     static let inset: CGFloat = 14
     static let gap: CGFloat = 12
     static let rowHeight: CGFloat = 32
@@ -28,6 +27,13 @@ enum MenuLayout {
         )
         return ceil(rect.width) + 2
     }
+
+    /// Fits `v.111.111.111 (111.111.111 available)` plus the Update pill.
+    static let width: CGFloat = {
+        let label = textWidth("v.111.111.111 (111.111.111 available)", font: headingFont)
+        let update = textWidth("Update", font: headingFont) + 16
+        return inset * 2 + gap + label + update + 8
+    }()
 }
 
 @MainActor
@@ -402,8 +408,7 @@ final class VersionMenuRow: MenuItemRowView {
     init() {
         labelField = menuLabel(
             font: MenuLayout.headingFont,
-            color: .secondaryLabelColor,
-            truncates: true
+            color: .secondaryLabelColor
         )
         updateButton = UpdatePill(frame: .zero)
         updateButton.isHidden = true

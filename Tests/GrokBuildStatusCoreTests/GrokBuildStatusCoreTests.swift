@@ -22,42 +22,64 @@ struct AppVersionTests {
     @Test func parsesGitHubLatestRelease() throws {
         let json = """
         {
-          "tag_name": "v.1.0.1",
-          "prerelease": false,
-          "assets": [
-            {
-              "name": "GrokBuildStatus.dmg",
-              "size": 538417,
-              "browser_download_url": "https://github.com/tembugi/grok-build-status/releases/download/v.1.0.1/GrokBuildStatus.dmg"
-            }
-          ]
+          "tag_name": "v1.0.3",
+          "prerelease": false
         }
         """.data(using: .utf8)!
         let release = try #require(GitHubRelease.parseLatest(from: json))
-        #expect(release.tag == "v.1.0.1")
-        #expect(release.version == SemanticVersion(major: 1, minor: 0, patch: 1))
-        #expect(release.dmgBytes == 538417)
-        #expect(release.dmgURL.lastPathComponent == "GrokBuildStatus.dmg")
-        #expect(DownloadSafety.isTrustedGitHub(release.dmgURL))
+        #expect(release.tag == "v1.0.3")
+        #expect(release.version == SemanticVersion(major: 1, minor: 0, patch: 3))
     }
 
-    @Test func skipsPrereleaseAndMissingDMG() {
+    @Test func skipsPrerelease() {
         let pre = """
-        {"tag_name":"v2.0.0","prerelease":true,"assets":[{"name":"GrokBuildStatus.dmg","size":1,"browser_download_url":"https://github.com/tembugi/grok-build-status/releases/download/v2.0.0/GrokBuildStatus.dmg"}]}
+        {"tag_name":"v2.0.0","prerelease":true}
         """.data(using: .utf8)!
         #expect(GitHubRelease.parseLatest(from: pre) == nil)
-
-        let noDMG = """
-        {"tag_name":"v2.0.0","prerelease":false,"assets":[{"name":"source.zip","size":1,"browser_download_url":"https://github.com/tembugi/grok-build-status/archive/v2.0.0.zip"}]}
-        """.data(using: .utf8)!
-        #expect(GitHubRelease.parseLatest(from: noDMG) == nil)
     }
 
-    @Test func rejectsOffSiteDownloads() {
-        #expect(DownloadSafety.isTrustedGitHub(URL(string: "https://github.com/tembugi/x/releases/download/v1/GrokBuildStatus.dmg")!))
-        #expect(DownloadSafety.isTrustedGitHub(URL(string: "https://objects.githubusercontent.com/github-production-release-asset-2e65be/foo")!))
-        #expect(!DownloadSafety.isTrustedGitHub(URL(string: "http://github.com/tembugi/x/a.dmg")!))
-        #expect(!DownloadSafety.isTrustedGitHub(URL(string: "https://evil.example/GrokBuildStatus.dmg")!))
+    @Test func parsesReleaseWithoutAssets() throws {
+        let json = """
+        {"tag_name":"v2.0.0","prerelease":false,"assets":[]}
+        """.data(using: .utf8)!
+        let release = try #require(GitHubRelease.parseLatest(from: json))
+        #expect(release.version == SemanticVersion(major: 2, minor: 0, patch: 0))
+    }
+
+    @Test func versionLineCheckingHasNoCurrent() {
+        let installed = SemanticVersion(major: 1, minor: 0, patch: 0)
+        let line = VersionLine.make(installed: installed, latest: nil, checking: true, failed: false)
+        #expect(line.label == "v.1.0.0")
+        #expect(!line.label.contains("(current)"))
+        #expect(!line.showUpdate)
+        #expect(line.toolTip == nil)
+    }
+
+    @Test func versionLineFailedHasNoCurrent() {
+        let installed = SemanticVersion(major: 1, minor: 0, patch: 0)
+        let line = VersionLine.make(installed: installed, latest: nil, checking: false, failed: true)
+        #expect(line.label == "v.1.0.0")
+        #expect(!line.label.contains("(current)"))
+        #expect(!line.showUpdate)
+        #expect(line.toolTip == "Could not reach GitHub releases.")
+    }
+
+    @Test func versionLineNewerOffersUpdate() {
+        let installed = SemanticVersion(major: 1, minor: 0, patch: 0)
+        let latest = GitHubRelease(tag: "v1.0.1", version: SemanticVersion(major: 1, minor: 0, patch: 1))
+        let line = VersionLine.make(installed: installed, latest: latest, checking: false, failed: false)
+        #expect(line.label == "v.1.0.0 (1.0.1 available)")
+        #expect(line.showUpdate)
+        #expect(line.toolTip == "Open the GitHub releases page.")
+    }
+
+    @Test func versionLineSameIsCurrent() {
+        let installed = SemanticVersion(major: 1, minor: 0, patch: 0)
+        let latest = GitHubRelease(tag: "v1.0.0", version: installed)
+        let line = VersionLine.make(installed: installed, latest: latest, checking: false, failed: false)
+        #expect(line.label == "v.1.0.0 (current)")
+        #expect(!line.showUpdate)
+        #expect(line.toolTip == nil)
     }
 }
 

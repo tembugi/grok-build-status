@@ -13,8 +13,10 @@ jobs:
     name: Test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Swift version
         run: swift --version
+      - name: Build
+        run: swift build
       - name: Test
         run: swift test

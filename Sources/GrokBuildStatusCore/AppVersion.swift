@@ -38,19 +38,13 @@ public struct SemanticVersion: Equatable, Comparable, Sendable {
 public struct GitHubRelease: Equatable, Sendable {
     public var tag: String
     public var version: SemanticVersion
-    public var dmgURL: URL
-    public var dmgBytes: Int
 
-    public init(tag: String, version: SemanticVersion, dmgURL: URL, dmgBytes: Int) {
+    public init(tag: String, version: SemanticVersion) {
         self.tag = tag
         self.version = version
-        self.dmgURL = dmgURL
-        self.dmgBytes = dmgBytes
     }
 
-    public static let dmgName = "GrokBuildStatus.dmg"
-
-    /// Latest published release that ships `GrokBuildStatus.dmg`.
+    /// Latest published release. Prereleases are ignored.
     public static func parseLatest(from data: Data) -> GitHubRelease? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -59,27 +53,48 @@ public struct GitHubRelease: Equatable, Sendable {
         guard let tag = object["tag_name"] as? String, let version = SemanticVersion(tag) else {
             return nil
         }
-        guard let assets = object["assets"] as? [[String: Any]] else { return nil }
-        for asset in assets {
-            guard asset["name"] as? String == dmgName else { continue }
-            guard let urlString = asset["browser_download_url"] as? String,
-                  let url = URL(string: urlString)
-            else { continue }
-            let size = (asset["size"] as? Int) ?? (asset["size"] as? Double).map(Int.init) ?? 0
-            return GitHubRelease(tag: tag, version: version, dmgURL: url, dmgBytes: size)
-        }
-        return nil
+        return GitHubRelease(tag: tag, version: version)
     }
 }
 
-public enum DownloadSafety {
-    /// GitHub API and release-asset hosts only.
-    public static func isTrustedGitHub(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https" else { return false }
-        guard let host = url.host?.lowercased() else { return false }
-        return host == "github.com"
-            || host.hasSuffix(".github.com")
-            || host == "githubusercontent.com"
-            || host.hasSuffix(".githubusercontent.com")
+/// Menu version row: label, Update pill, tooltip.
+public struct VersionLine: Equatable, Sendable {
+    public var label: String
+    public var showUpdate: Bool
+    public var toolTip: String?
+
+    /// Failed check with no release must not say `(current)`.
+    public static func make(
+        installed: SemanticVersion,
+        latest: GitHubRelease?,
+        checking: Bool,
+        failed: Bool
+    ) -> VersionLine {
+        if let latest, latest.version > installed {
+            return VersionLine(
+                label: "v.\(installed.display) (\(latest.version.display) available)",
+                showUpdate: true,
+                toolTip: "Open the GitHub releases page."
+            )
+        }
+        if latest == nil, checking {
+            return VersionLine(
+                label: "v.\(installed.display)",
+                showUpdate: false,
+                toolTip: nil
+            )
+        }
+        if latest == nil, failed {
+            return VersionLine(
+                label: "v.\(installed.display)",
+                showUpdate: false,
+                toolTip: "Could not reach GitHub releases."
+            )
+        }
+        return VersionLine(
+            label: "v.\(installed.display) (current)",
+            showUpdate: false,
+            toolTip: nil
+        )
     }
 }
