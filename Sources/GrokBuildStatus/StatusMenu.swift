@@ -414,11 +414,10 @@ final class VersionMenuRow: MenuItemRowView {
         updateButton.action = #selector(tapUpdate)
     }
 
-    func set(label: String, showUpdate: Bool, updating: Bool = false) {
+    func set(label: String, showUpdate: Bool) {
         labelField.stringValue = label
-        updateButton.title = updating ? "Updating…" : "Update"
-        updateButton.isEnabled = showUpdate && !updating
-        updateButton.isHidden = !showUpdate && !updating
+        updateButton.isEnabled = showUpdate
+        updateButton.isHidden = !showUpdate
         updateButton.invalidateIntrinsicContentSize()
         needsLayout = true
         layoutSubtreeIfNeeded()

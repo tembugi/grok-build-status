@@ -33,7 +33,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var latestRelease: GitHubRelease?
     private var latestCheckFailed = false
     private var checkingLatest = false
-    private var installingUpdate = false
     private var lastLatestCheck: TimeInterval = 0
 
     override init() {
@@ -340,7 +339,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let row = VersionMenuRow()
         versionRow = row
         row.onUpdate = { [weak self] in
-            self?.beginUpdate()
+            self?.openReleases()
         }
         let item = NSMenuItem()
         item.view = row
@@ -351,21 +350,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let current = AppUpdate.current.display
         guard let row = versionRow else { return }
 
-        if installingUpdate {
-            row.set(label: "Version \(current)", showUpdate: true, updating: true)
-            row.toolTip = nil
-            return
-        }
-
         if let latest = latestRelease, latest.version > AppUpdate.current {
-            let inApps = AppUpdate.installedInApplications
             row.set(
                 label: "Version \(current) (v.\(latest.version.display) available)",
                 showUpdate: true
             )
-            row.toolTip = inApps
-                ? "Replace the app in Applications with this GitHub release."
-                : "Install \(Self.displayName) to Applications to update."
+            row.toolTip = "Open the GitHub releases page."
             return
         }
 
@@ -385,7 +375,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             syncUpdateRows()
             return
         }
-        if checkingLatest || installingUpdate { return }
+        if checkingLatest { return }
         checkingLatest = true
         syncUpdateRows()
         do {
@@ -400,33 +390,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         syncUpdateRows()
     }
 
-    private func beginUpdate() {
-        guard let release = latestRelease, !installingUpdate else { return }
-        guard release.version > AppUpdate.current else { return }
+    private func openReleases() {
         item.menu?.cancelTracking()
-        guard AppUpdate.pretendVersion == nil else {
-            NSSound.beep()
-            return
-        }
-        guard AppUpdate.installedInApplications else {
-            NSSound.beep()
-            return
-        }
-        installingUpdate = true
-        syncUpdateRows()
-        Task { @MainActor [weak self] in
-            do {
-                try await Task.detached {
-                    try await AppUpdate.install(release)
-                }.value
-                try await Task.sleep(nanoseconds: 250_000_000)
-                NSApp.terminate(nil)
-            } catch {
-                self?.installingUpdate = false
-                NSSound.beep()
-                self?.syncUpdateRows()
-            }
-        }
+        NSWorkspace.shared.open(AppUpdate.releasesPage)
     }
 
     @objc private func focusMayHaveChanged(_ notification: Notification) {

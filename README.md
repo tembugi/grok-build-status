@@ -31,7 +31,7 @@ Drag the app to the Trash to remove it. Login is cleared automatically.
 
 Grok Build Status stays on your Mac. It only reads what it needs to function. It does not collect your information or send telemetry.
 
-It asks GitHub for the latest release when you open the menu. Update downloads this project's official DMG.
+It asks GitHub for the latest release when you open the menu. Update opens this project's GitHub releases page.
 
 ## From source
 
